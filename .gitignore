@@ -1,0 +1,20 @@
+# Cat GPT ignore rules
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.env
+.env.*
+!.env.example
+data/
+*.db
+*.sqlite3
+*.faiss
+forntend/node_modules/
+forntend/.next/
+forntend/out/
+forntend/.env*.local
+.DS_Store
+*.log
+.vscode/
+.idea/

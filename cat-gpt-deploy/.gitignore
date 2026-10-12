@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Secrets
+.env
+.env.*
+!.env.example
+
+# App data (SQLite DBs, uploads, FAISS index)
+data/
+*.db
+*.sqlite3
+*.faiss
+
+# Frontend build artifacts
+forntend/node_modules/
+forntend/.next/
+forntend/out/
+forntend/.env*.local
+
+# Misc
+.DS_Store
+*.log
+.vscode/
+.idea/

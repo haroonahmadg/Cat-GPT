@@ -1,0 +1,2 @@
+[server]
+folderWatchBlacklist = ["data", "data/faiss", "data/upload"]
