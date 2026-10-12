@@ -1,0 +1,16 @@
+forntend/
+data/
+.venv/
+venv/
+.git/
+.env
+.env.*
+*.db
+*.sqlite
+*.sqlite3
+__pycache__/
+*.pyc
+node_modules/
+.next/
+*.md
+cat-gpt-deploy/
