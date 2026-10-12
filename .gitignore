@@ -18,3 +18,7 @@ forntend/.env*.local
 *.log
 .vscode/
 .idea/
+
+*.sqlite
+test_image.png
+body.json
