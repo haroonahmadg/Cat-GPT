@@ -4,11 +4,17 @@ import ast
 import math
 import contextvars
 import operator as op
+import re
+import secrets
+import string
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+import httpx
 import requests
 from dotenv import load_dotenv
 
@@ -1622,3 +1628,698 @@ def get_user_memories() -> str:
             tool="get_user_memories",
         )
         return f"Memory error: {exc}"
+
+
+# =========================================================
+# EXTRA ASSISTANT TOOLS
+# =========================================================
+
+def _tool_env(name: str, default: str | None = None) -> str | None:
+    """Read tool configuration through the agent's shared environment helper."""
+    from agent.graph import get_env
+
+    return get_env(name, default)
+
+
+def _get_json(
+    feature: str,
+    url: str,
+    *,
+    params: dict[str, Any] | None = None,
+) -> tuple[Any | None, str | None]:
+    """Fetch and decode a JSON API response with specific failure messages."""
+    try:
+        response = httpx.get(url, params=params, timeout=10)
+    except httpx.TimeoutException:
+        return None, f"The {feature} request timed out. Please try again."
+    except httpx.RequestError as exc:
+        return None, f"Could not connect to {feature} ({type(exc).__name__})."
+
+    if response.status_code != 200:
+        detail = ""
+        if feature == "cricket scores":
+            try:
+                error_payload = response.json()
+            except (ValueError, TypeError):
+                error_payload = None
+            if isinstance(error_payload, dict):
+                detail = str(error_payload.get("message", ""))[:160]
+        suffix = f": {detail}" if detail else ""
+        return None, f"The {feature} service returned HTTP {response.status_code}{suffix}."
+    try:
+        return response.json(), None
+    except (ValueError, TypeError):
+        return None, f"The {feature} service returned invalid JSON."
+
+
+def _weather_description(code: Any) -> str:
+    if not isinstance(code, int):
+        return "unknown conditions"
+    descriptions = {
+        0: "clear sky", 1: "mainly clear", 2: "partly cloudy", 3: "overcast",
+        45: "fog", 48: "rime fog", 51: "light drizzle", 53: "drizzle",
+        55: "heavy drizzle", 61: "light rain", 63: "rain", 65: "heavy rain",
+        71: "light snow", 73: "snow", 75: "heavy snow", 80: "rain showers",
+        81: "heavy rain showers", 82: "violent rain showers",
+        95: "thunderstorm", 96: "thunderstorm with hail",
+        99: "heavy thunderstorm with hail",
+    }
+    return descriptions.get(code, "unknown conditions")
+
+
+@tool
+def get_weather(city: str) -> str:
+    """Use this tool for current conditions and a 3-day forecast; prefer it over web_search for live weather."""
+    city = city.strip() if isinstance(city, str) else ""
+    if not city:
+        return "Weather lookup needs a city name."
+    if len(city) > 100:
+        return "City name is too long for weather lookup (maximum 100 characters)."
+
+    emit_tool_event("Looking up city", event="tool_started", tool="get_weather")
+    locations, error = _get_json(
+        "city lookup",
+        "https://geocoding-api.open-meteo.com/v1/search",
+        params={"name": city, "count": 1},
+    )
+    if error:
+        return f"Weather lookup failed: {error}"
+    if not isinstance(locations, dict) or not isinstance(locations.get("results"), list):
+        return "Weather lookup failed: the city service returned unexpected data."
+    results = locations["results"]
+    if not results:
+        return f"I couldn't find a city named {city[:100]}."
+    location = results[0]
+    if not isinstance(location, dict):
+        return "Weather lookup failed: the city service returned an invalid location."
+    latitude, longitude = location.get("latitude"), location.get("longitude")
+    if not isinstance(latitude, (int, float)) or not isinstance(longitude, (int, float)):
+        return "Weather lookup failed: the city service omitted its coordinates."
+
+    emit_tool_event("Getting weather forecast", event="tool_started", tool="get_weather")
+    forecast, error = _get_json(
+        "weather forecast",
+        "https://api.open-meteo.com/v1/forecast",
+        params={
+            "latitude": latitude,
+            "longitude": longitude,
+            "current": "temperature_2m,relative_humidity_2m,weather_code,wind_speed_10m",
+            "daily": "temperature_2m_max,temperature_2m_min,weather_code",
+            "timezone": "auto",
+            "forecast_days": 3,
+        },
+    )
+    if error:
+        return f"Weather lookup failed: {error}"
+    if not isinstance(forecast, dict):
+        return "Weather lookup failed: the forecast service returned unexpected data."
+    current, daily = forecast.get("current"), forecast.get("daily")
+    if not isinstance(current, dict) or not isinstance(daily, dict):
+        return "Weather lookup failed: the forecast omitted current or daily conditions."
+    try:
+        temperature = float(current["temperature_2m"])
+        humidity = int(current["relative_humidity_2m"])
+        wind = float(current["wind_speed_10m"])
+        current_code = current["weather_code"]
+        current_desc = _weather_description(current_code)
+        dates = daily["time"]
+        highs, lows, codes = (
+            daily["temperature_2m_max"],
+            daily["temperature_2m_min"],
+            daily["weather_code"],
+        )
+    except (KeyError, TypeError, ValueError, OverflowError):
+        return "Weather lookup failed: the forecast omitted required weather values."
+    if (
+        not math.isfinite(temperature)
+        or not math.isfinite(wind)
+        or not 0 <= humidity <= 100
+        or not isinstance(current_code, int)
+    ):
+        return "Weather lookup failed: the forecast returned invalid current conditions."
+    if not all(isinstance(values, list) for values in (dates, highs, lows, codes)):
+        return "Weather lookup failed: the daily forecast has an unexpected format."
+    if min(len(dates), len(highs), len(lows), len(codes)) < 3:
+        return "Weather lookup failed: the service returned fewer than three forecast days."
+    forecast_lines = []
+    for day, high, low, code in zip(dates[:3], highs[:3], lows[:3], codes[:3]):
+        if (
+            not isinstance(day, str)
+            or not isinstance(high, (int, float))
+            or not isinstance(low, (int, float))
+            or not math.isfinite(high)
+            or not math.isfinite(low)
+            or not isinstance(code, int)
+        ):
+            return "Weather lookup failed: the daily forecast contains invalid values."
+        forecast_lines.append(
+            f"{day}: {_weather_description(code)}, {float(low):.0f}-{float(high):.0f}°C"
+        )
+    city_name = location.get("name", city)
+    return (
+        f"{city_name}: {temperature:.1f}°C, {current_desc}, humidity {humidity}%, "
+        f"wind {wind:.1f} km/h. Next 3 days: {'; '.join(forecast_lines)}"
+    )[:600]
+
+
+@tool
+def get_prayer_times(city: str, country: str = "Pakistan") -> str:
+    """Use this tool for today's prayer schedule; prefer it over web_search for prayer times."""
+    if not isinstance(city, str) or not city.strip():
+        return "Prayer-time lookup needs a city name."
+    if not isinstance(country, str) or not country.strip():
+        return "Prayer-time lookup needs a country name."
+    if len(city) > 100 or len(country) > 100:
+        return "City and country names must be 100 characters or fewer."
+
+    emit_tool_event("Looking up prayer times", event="tool_started", tool="get_prayer_times")
+    payload, error = _get_json(
+        "prayer-time lookup",
+        "https://api.aladhan.com/v1/timingsByCity",
+        params={"city": city.strip(), "country": country.strip(), "method": 1},
+    )
+    if error:
+        if "HTTP 400" in error or "HTTP 404" in error:
+            return f"Could not find prayer times for {city.strip()}, {country.strip()}; check the spelling."
+        return f"Prayer-time lookup failed: {error}"
+    data = payload.get("data") if isinstance(payload, dict) else None
+    timings = data.get("timings") if isinstance(data, dict) else None
+    if not isinstance(timings, dict):
+        return (
+            f"Could not find prayer times for {city.strip()}, {country.strip()}; "
+            "check the spelling or try another city."
+        )
+    names = ("Fajr", "Dhuhr", "Asr", "Maghrib", "Isha")
+    if any(
+        not isinstance(timings.get(name), str) or len(timings[name]) > 20
+        for name in names
+    ):
+        return "Prayer-time lookup failed: the service returned an incomplete prayer schedule."
+    return ", ".join(f"{name} {timings[name]}" for name in names)[:600]
+
+
+@tool
+def convert_currency(amount: float, from_code: str, to_code: str) -> str:
+    """Use this tool for an exchange-rate conversion; prefer it over web_search for current rates."""
+    if not isinstance(amount, (int, float)) or isinstance(amount, bool) or not math.isfinite(amount) or amount < 0:
+        return "Currency conversion needs a finite, non-negative amount."
+    source = from_code.strip().upper() if isinstance(from_code, str) else ""
+    target = to_code.strip().upper() if isinstance(to_code, str) else ""
+    if not re.fullmatch(r"[A-Z]{3}", source) or not re.fullmatch(r"[A-Z]{3}", target):
+        return "Use three-letter currency codes, such as USD, EUR, or PKR."
+
+    emit_tool_event("Getting exchange rate", event="tool_started", tool="convert_currency")
+    payload, error = _get_json(
+        "currency conversion",
+        f"https://open.er-api.com/v6/latest/{source}",
+    )
+    if error:
+        return f"Currency conversion failed: {error}"
+    if not isinstance(payload, dict):
+        return "Currency conversion failed: the exchange-rate service returned unexpected data."
+    rates = payload.get("rates")
+    if payload.get("result") != "success" or not isinstance(rates, dict):
+        return f"The exchange-rate service doesn't recognize currency code {source}."
+    rate = rates.get(target)
+    if not isinstance(rate, (int, float)) or not math.isfinite(rate):
+        return f"The exchange-rate service doesn't recognize currency code {target}."
+    rate_date = payload.get("time_last_update_utc") or payload.get("time_last_update_unix")
+    if not isinstance(rate_date, (str, int, float)):
+        return "Currency conversion failed: the service omitted the rate date."
+    converted = amount * float(rate)
+    if not math.isfinite(converted):
+        return "Currency conversion failed: the converted amount is outside the supported range."
+    return (
+        f"{amount:g} {source} = {converted:,.2f} {target} "
+        f"(rate {rate:g}; updated {rate_date})."
+    )[:600]
+
+
+_COINGECKO_IDS = {
+    "BTC": "bitcoin", "ETH": "ethereum", "SOL": "solana", "DOGE": "dogecoin",
+    "ADA": "cardano", "XRP": "ripple", "BNB": "binancecoin", "LTC": "litecoin",
+    "DOT": "polkadot", "AVAX": "avalanche-2", "MATIC": "matic-network",
+    "POL": "polygon-ecosystem-token", "LINK": "chainlink", "SHIB": "shiba-inu",
+}
+
+
+@tool
+def get_crypto_price(symbol: str = "BTC") -> str:
+    """Use this tool for a live cryptocurrency quote; prefer it over web_search for crypto prices."""
+    ticker = symbol.strip().upper() if isinstance(symbol, str) else ""
+    coin_id = _COINGECKO_IDS.get(ticker)
+    if not coin_id:
+        return "Unsupported symbol. Examples: BTC, ETH, SOL, DOGE, ADA, XRP."
+
+    emit_tool_event("Getting cryptocurrency prices", event="tool_started", tool="get_crypto_price")
+    payload, error = _get_json(
+        "cryptocurrency price lookup",
+        "https://api.coingecko.com/api/v3/simple/price",
+        params={
+            "ids": coin_id,
+            "vs_currencies": "usd,pkr",
+            "include_24hr_change": "true",
+        },
+    )
+    if error:
+        return f"Crypto-price lookup failed: {error}"
+    quote_data = payload.get(coin_id) if isinstance(payload, dict) else None
+    if not isinstance(quote_data, dict):
+        return f"The price service returned no quote for {ticker}."
+    try:
+        usd, pkr = quote_data["usd"], quote_data["pkr"]
+        usd_change = quote_data["usd_24h_change"]
+        pkr_change = quote_data["pkr_24h_change"]
+    except KeyError:
+        return "Crypto-price lookup failed: the service omitted a price or 24-hour change."
+    if any(
+        not isinstance(value, (int, float)) or not math.isfinite(value)
+        for value in (usd, pkr, usd_change, pkr_change)
+    ):
+        return "Crypto-price lookup failed: the service returned invalid price data."
+    return (
+        f"{ticker}: ${usd:,.2f} ({usd_change:+.2f}% 24h); "
+        f"PKR {pkr:,.2f} ({pkr_change:+.2f}% 24h)."
+    )[:600]
+
+
+@tool
+def get_cricket_score(team: str = "") -> str:
+    """Use this tool for live cricket scores; prefer it over web_search for current matches."""
+    api_key = _tool_env("CRICAPI_KEY")
+    if not api_key:
+        return "Cricket scores are not configured on this server."
+
+    emit_tool_event("Checking current cricket matches", event="tool_started", tool="get_cricket_score")
+    payload, error = _get_json(
+        "cricket scores",
+        "https://api.cricapi.com/v1/currentMatches",
+        params={"apikey": api_key, "offset": 0},
+    )
+    if error:
+        if "HTTP 429" in error or (
+            "HTTP 403" in error
+            and any(word in error.lower() for word in ("daily", "limit", "quota"))
+        ):
+            return "Cricket score daily limit reached, try tomorrow."
+        return f"Cricket score lookup failed: {error}"
+    if not isinstance(payload, dict):
+        return "Cricket score lookup failed: the service returned unexpected data."
+    status_message = f"{payload.get('status', '')} {payload.get('message', '')}".lower()
+    if any(term in status_message for term in ("daily limit", "quota", "limit exceeded", "per day")):
+        return "Cricket score daily limit reached, try tomorrow."
+    if payload.get("status") not in ("success", "ok"):
+        message = str(payload.get("message", "the service rejected the request"))[:180]
+        return f"Cricket score lookup failed: {message}."
+    matches = payload.get("data")
+    if not isinstance(matches, list):
+        return "Cricket score lookup failed: the service omitted its match list."
+
+    output = []
+    normalized_team = team.strip().casefold() if isinstance(team, str) else ""
+    for match in matches:
+        if not isinstance(match, dict):
+            continue
+        teams = match.get("teams")
+        if not isinstance(teams, list):
+            info = match.get("teamInfo")
+            teams = [
+                item.get("name") for item in info
+                if isinstance(item, dict) and isinstance(item.get("name"), str)
+            ] if isinstance(info, list) else []
+        names = [name for name in teams if isinstance(name, str)]
+        if normalized_team and not any(normalized_team in name.casefold() for name in names):
+            continue
+        if not names:
+            continue
+        scores = match.get("score")
+        score_text = ""
+        if isinstance(scores, list):
+            score_text = " | ".join(
+                f"{item.get('inning', 'Innings')}: {item.get('r', '?')}/{item.get('w', '?')} "
+                f"({item.get('o', '?')} ov)"
+                for item in scores[:2] if isinstance(item, dict)
+            )
+        status = match.get("status")
+        if not isinstance(status, str) or not status:
+            return "Cricket score lookup failed: a match is missing its status."
+        output.append(f"{' vs '.join(names)}: {score_text or 'score pending'} — {status}")
+        if len(output) == 3:
+            break
+    if not output:
+        suffix = f" for {team.strip()}" if normalized_team else ""
+        return f"No current cricket matches found{suffix}."
+    return "\n".join(output)[:600]
+
+
+@tool
+def get_movie_info(title: str) -> str:
+    """Use this tool for movie facts and a short plot; prefer it over web_search for film metadata."""
+    query = title.strip() if isinstance(title, str) else ""
+    if not query:
+        return "Movie lookup needs a title."
+    if len(query) > 200:
+        return "Movie title is too long (maximum 200 characters)."
+    api_key = _tool_env("OMDB_API_KEY")
+    if not api_key:
+        return "Movie information is not configured on this server."
+
+    emit_tool_event("Looking up movie", event="tool_started", tool="get_movie_info")
+    payload, error = _get_json(
+        "movie lookup",
+        "https://www.omdbapi.com/",
+        params={"apikey": api_key, "t": query},
+    )
+    if error:
+        return f"Movie lookup failed: {error}"
+    if not isinstance(payload, dict):
+        return "Movie lookup failed: the service returned unexpected data."
+    if payload.get("Response") == "False":
+        if payload.get("Error") == "Movie not found!":
+            return f"Movie not found: {query[:120]}."
+        return f"Movie lookup failed: {str(payload.get('Error', 'unknown API error'))[:180]}"
+    if payload.get("Response") != "True":
+        return "Movie lookup failed: the service omitted its response status."
+    fields = ("Title", "Year", "Runtime", "Genre", "imdbRating", "Plot")
+    if any(not isinstance(payload.get(field), str) or not payload[field].strip() for field in fields):
+        return "Movie lookup failed: the service omitted title, year, runtime, genre, rating, or plot."
+    plot = payload["Plot"].strip()
+    if len(plot) > 220:
+        plot = plot[:217].rstrip() + "..."
+    return (
+        f"{payload['Title']} ({payload['Year']}) — {payload['Runtime']}, {payload['Genre']}; "
+        f"IMDb {payload['imdbRating']}. {plot}"
+    )[:600]
+
+
+@tool
+def get_datetime(
+    timezone_name: str = "Asia/Karachi",
+    convert_from: str | None = None,
+) -> str:
+    """Use this tool for date/time lookup; prefer it over web_search for timezone conversion and current time."""
+    if not isinstance(timezone_name, str) or len(timezone_name) > 100:
+        return "Timezone name must be a valid IANA timezone."
+    try:
+        target_zone = ZoneInfo(timezone_name)
+    except (ZoneInfoNotFoundError, TypeError):
+        return f"Unknown timezone: {timezone_name}."
+    instant = datetime.now(UTC)
+    target_time = instant.astimezone(target_zone)
+    if convert_from is None:
+        return f"{target_time.strftime('%Y-%m-%d %H:%M:%S %Z')} ({timezone_name})."
+    if not isinstance(convert_from, str) or len(convert_from) > 100:
+        return "Source timezone name must be a valid IANA timezone."
+    try:
+        source_zone = ZoneInfo(convert_from)
+    except (ZoneInfoNotFoundError, TypeError):
+        return f"Unknown timezone: {convert_from}."
+    source_time = instant.astimezone(source_zone)
+    return (
+        f"{source_time.strftime('%Y-%m-%d %H:%M:%S %Z')} ({convert_from}) = "
+        f"{target_time.strftime('%Y-%m-%d %H:%M:%S %Z')} ({timezone_name})."
+    )[:600]
+
+
+@tool
+def generate_qr_code(text: str) -> str:
+    """Use this tool to create a QR code image for text, a URL, or contact details."""
+    content = text.strip() if isinstance(text, str) else ""
+    if not content:
+        return "QR-code generation needs non-empty text."
+    if len(content) > 2000:
+        return "QR-code text is too long (maximum 2000 characters)."
+    user_id = active_user_id.get()
+    if not user_id:
+        return "Sign in before saving a generated QR code."
+
+    emit_tool_event("Generating QR code", event="tool_started", tool="generate_qr_code")
+    saved_path: Path | None = None
+    try:
+        response = httpx.get(
+            "https://api.qrserver.com/v1/create-qr-code/",
+            params={"size": "300x300", "data": content},
+            timeout=10,
+        )
+        if response.status_code != 200:
+            raise ValueError(f"QR-code service returned HTTP {response.status_code}.")
+        if not response.headers.get("content-type", "").lower().startswith("image/png"):
+            raise ValueError("QR-code service returned data that was not a PNG image.")
+        if not response.content:
+            raise ValueError("QR-code service returned an empty image.")
+
+        filename = f"{uuid.uuid4().hex[:16]}.png"
+        saved_path = get_generated_image_dir(user_id, create=True) / filename
+        from io import BytesIO
+        from PIL import Image
+
+        with Image.open(BytesIO(response.content)) as image:
+            if image.format != "PNG":
+                raise ValueError("the returned image is not a valid PNG.")
+            image.convert("RGB").save(saved_path, format="PNG")
+        if saved_path.stat().st_size == 0:
+            raise ValueError("the saved QR image is empty.")
+        emit_tool_event("QR code generated", event="tool_completed", tool="generate_qr_code")
+        return f"{GENERATED_IMAGE_MARKER}{filename}"
+    except httpx.TimeoutException:
+        error_message = "The QR-code request timed out. Please try again."
+    except httpx.RequestError as exc:
+        error_message = f"The QR-code request failed ({type(exc).__name__})."
+    except ValueError as exc:
+        error_message = str(exc)
+    except Exception as exc:
+        logger.exception("QR-code generation failed")
+        error_message = f"QR-code image could not be validated or saved ({type(exc).__name__})."
+
+    if saved_path is not None:
+        try:
+            saved_path.unlink(missing_ok=True)
+        except OSError:
+            logger.warning("Could not remove incomplete QR image %s", saved_path)
+    emit_tool_event("QR code generation failed", event="tool_error", tool="generate_qr_code")
+    return error_message
+
+
+@tool
+def generate_password(length: int = 16) -> str:
+    """Use this tool to generate a strong random password for the user."""
+    if not isinstance(length, int) or isinstance(length, bool):
+        return "Password length must be a whole number from 8 to 64."
+    if not 8 <= length <= 64:
+        return "Password length must be between 8 and 64 characters."
+    groups = (
+        string.ascii_uppercase,
+        string.ascii_lowercase,
+        string.digits,
+        "!@#$%^&*()-_=+[]{}?",
+    )
+    password = [secrets.choice(group) for group in groups]
+    alphabet = "".join(groups)
+    password.extend(secrets.choice(alphabet) for _ in range(length - len(password)))
+    secrets.SystemRandom().shuffle(password)
+    return "".join(password)
+
+
+@tool
+def define_word(word: str) -> str:
+    """Use this tool for dictionary definitions and synonyms; prefer it over web_search for English meanings."""
+    query = word.strip() if isinstance(word, str) else ""
+    if not query:
+        return "Dictionary lookup needs a word."
+    if len(query) > 100:
+        return "Word is too long for dictionary lookup (maximum 100 characters)."
+
+    emit_tool_event("Looking up word", event="tool_started", tool="define_word")
+    payload, error = _get_json(
+        "dictionary lookup",
+        f"https://api.dictionaryapi.dev/api/v2/entries/en/{quote(query, safe='')}",
+    )
+    if error:
+        if "HTTP 404" in error:
+            return f"No dictionary definition found for '{query}'."
+        return f"Dictionary lookup failed: {error}"
+    if not isinstance(payload, list) or not payload or not isinstance(payload[0], dict):
+        return f"No dictionary definition found for '{query}'."
+    meanings = payload[0].get("meanings")
+    if not isinstance(meanings, list) or not meanings or not isinstance(meanings[0], dict):
+        return "Dictionary lookup failed: the service returned no usable meanings."
+    part = meanings[0].get("partOfSpeech")
+    definitions = meanings[0].get("definitions")
+    if not isinstance(part, str) or not isinstance(definitions, list) or not definitions:
+        return "Dictionary lookup failed: the service omitted a part of speech or definition."
+    definition_texts = [
+        item.get("definition")
+        for item in definitions[:2]
+        if isinstance(item, dict) and isinstance(item.get("definition"), str)
+    ]
+    if not definition_texts:
+        return "Dictionary lookup failed: the service returned no valid definitions."
+    synonyms = []
+    for meaning in meanings:
+        if not isinstance(meaning, dict) or not isinstance(meaning.get("synonyms"), list):
+            continue
+        for synonym in meaning["synonyms"]:
+            if isinstance(synonym, str) and synonym not in synonyms:
+                synonyms.append(synonym)
+            if len(synonyms) == 3:
+                break
+        if len(synonyms) == 3:
+            break
+    result = f"{query} ({part}): {'; '.join(definition_texts)}"
+    if synonyms:
+        result += f" Synonyms: {', '.join(synonyms)}."
+    return result[:600]
+
+
+@tool
+def get_cat_fact() -> str:
+    """Use this tool for cat facts; prefer it over web_search for a quick, verified fact."""
+    emit_tool_event("Finding a cat fact", event="tool_started", tool="get_cat_fact")
+    payload, error = _get_json("cat-fact lookup", "https://catfact.ninja/fact")
+    if error:
+        return f"Cat fact lookup failed: {error}"
+    fact = payload.get("fact") if isinstance(payload, dict) else None
+    if not isinstance(fact, str) or not fact.strip():
+        return "Cat fact lookup failed: the service returned no fact."
+    return fact.strip()[:600]
+
+
+def _reserve_email_send(user_id: str, daily_limit: int) -> tuple[str | None, str | None]:
+    """Atomically reserve a daily email slot so concurrent requests respect the cap."""
+    from api.store import get_ui_connection
+
+    reservation_id = uuid.uuid4().hex
+    day = datetime.now(UTC).date().isoformat()
+    connection = get_ui_connection()
+    try:
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS email_send_log (
+                reservation_id TEXT PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                sent_date TEXT NOT NULL
+            )
+            """
+        )
+        connection.execute(
+            "CREATE INDEX IF NOT EXISTS idx_email_send_user_day "
+            "ON email_send_log(user_id, sent_date)"
+        )
+        connection.execute("BEGIN IMMEDIATE")
+        count = connection.execute(
+            "SELECT COUNT(*) FROM email_send_log WHERE user_id = ? AND sent_date = ?",
+            (user_id, day),
+        ).fetchone()[0]
+        if count >= daily_limit:
+            connection.rollback()
+            return None, "daily email limit reached."
+        connection.execute(
+            "INSERT INTO email_send_log(reservation_id, user_id, sent_date) VALUES (?, ?, ?)",
+            (reservation_id, user_id, day),
+        )
+        connection.commit()
+        return reservation_id, None
+    except Exception:
+        connection.rollback()
+        logger.exception("Could not reserve daily email allowance")
+        return None, "Email sending is temporarily unavailable because the daily limit could not be checked."
+    finally:
+        connection.close()
+
+
+def _release_email_reservation(reservation_id: str) -> None:
+    from api.store import get_ui_connection
+
+    connection = get_ui_connection()
+    try:
+        connection.execute("DELETE FROM email_send_log WHERE reservation_id = ?", (reservation_id,))
+        connection.commit()
+    except Exception:
+        connection.rollback()
+        logger.exception("Could not release failed email reservation")
+    finally:
+        connection.close()
+
+
+@tool
+def send_email(subject: str, body: str) -> str:
+    """Use this tool to email a concise note to the authenticated user's own verified address."""
+    clean_subject = subject.strip() if isinstance(subject, str) else ""
+    if not clean_subject:
+        return "Email subject cannot be empty."
+    if len(clean_subject) > 200:
+        return "Email subject is too long (maximum 200 characters)."
+    clean_body = body[:2000] if isinstance(body, str) else ""
+    if not clean_body.strip():
+        return "Email body cannot be empty."
+    api_key = _tool_env("RESEND_API_KEY")
+    if not api_key:
+        return "Email sending is not configured on this server."
+
+    user_id = active_user_id.get()
+    if not user_id:
+        return "Sign in with a verified Google account before sending email."
+    from api.store import get_ui_connection
+
+    connection = get_ui_connection()
+    try:
+        user = connection.execute(
+            "SELECT email, google_id FROM users WHERE user_id = ?",
+            (user_id,),
+        ).fetchone()
+    except Exception:
+        logger.exception("Could not look up authenticated email recipient")
+        return "Email sending is temporarily unavailable because your account could not be checked."
+    finally:
+        connection.close()
+    if not user or not user[0] or not user[1]:
+        return "Email sending requires a verified Google email address on your account."
+    recipient = str(user[0]).strip()
+    if not recipient:
+        return "Email sending requires a verified Google email address on your account."
+
+    raw_limit = _tool_env("EMAIL_DAILY_LIMIT", "5") or "5"
+    try:
+        daily_limit = int(raw_limit)
+        if daily_limit < 1:
+            raise ValueError
+    except ValueError:
+        return "Email sending is not configured: EMAIL_DAILY_LIMIT must be a positive whole number."
+    reservation_id, error = _reserve_email_send(user_id, daily_limit)
+    if error:
+        return error
+    assert reservation_id is not None
+
+    emit_tool_event("Sending email to your verified address", event="tool_started", tool="send_email")
+    try:
+        response = httpx.post(
+            "https://api.resend.com/emails",
+            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+            json={
+                "from": "Cat GPT <onboarding@resend.dev>",
+                "to": [recipient],
+                "subject": clean_subject,
+                "text": clean_body,
+            },
+            timeout=10,
+        )
+    except httpx.TimeoutException:
+        _release_email_reservation(reservation_id)
+        return "Email request timed out; please try again."
+    except httpx.RequestError as exc:
+        _release_email_reservation(reservation_id)
+        return f"Email request failed ({type(exc).__name__}); please try again."
+    if response.status_code == 429:
+        _release_email_reservation(reservation_id)
+        return "The email provider rate limit was reached; please try again later."
+    if not 200 <= response.status_code < 300:
+        _release_email_reservation(reservation_id)
+        return f"Email provider rejected the request with HTTP {response.status_code}."
+    try:
+        result = response.json()
+    except (ValueError, TypeError):
+        return "Email provider accepted the request but returned invalid confirmation data."
+    if not isinstance(result, dict) or not isinstance(result.get("id"), str):
+        return "Email provider accepted the request but omitted its message ID."
+    emit_tool_event("Email sent", event="tool_completed", tool="send_email")
+    return f"Email sent to your verified address (message {result['id'][:80]})."
