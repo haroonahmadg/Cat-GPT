@@ -926,13 +926,10 @@ def rag_search(
             page = metadata.get(
                 "page"
             )
+            source = metadata.get("source")
+            page_number = page + 1 if isinstance(page, int) else None
 
-            if isinstance(page, int):
-
-                page_number = (
-                    page + 1
-                )
-
+            if page_number is not None:
                 source_info = (
                     f"Page {page_number}"
                 )
@@ -943,10 +940,27 @@ def rag_search(
                     "Unknown page"
                 )
 
+            source_marker = ""
+            if isinstance(source, str) and source.strip():
+                source_file = Path(source).name
+                citation = {
+                    "file": source_file,
+                    "page": page_number,
+                    "preview": str(metadata.get("preview") or content)[:240],
+                }
+                emit_tool_event(
+                    "Document source found",
+                    event="citation",
+                    tool="rag_search",
+                    citation=citation,
+                )
+                page_suffix = f" p.{page_number}" if page_number is not None else ""
+                source_marker = f"\n[source: {source_file}{page_suffix}]"
+
             formatted_results.append(
                 f"Result {index} "
                 f"({source_info}):\n"
-                f"{content}"
+                f"{content}{source_marker}"
             )
 
         if not formatted_results:

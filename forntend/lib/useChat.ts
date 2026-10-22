@@ -442,6 +442,14 @@ export function useChat() {
                   err instanceof ApiError ? err.message : "Could not load the generated image.",
                 );
               });
+          } else if (event.type === "citations") {
+            setMessages((prev) =>
+              prev.map((m) =>
+                m.id === assistantMessage.id
+                  ? { ...m, citations: event.items }
+                  : m,
+              ),
+            );
           }else if (event.type === "activity") {
             setCatMood("working");
             // Only shown while no real text has arrived yet for this

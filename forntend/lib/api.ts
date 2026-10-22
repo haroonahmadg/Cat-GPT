@@ -12,6 +12,7 @@ import {
   EditResponseDTO,
   StreamEvent,
   ApiError,
+  Citation,
   GeneratedImageDTO,
   LibraryMediaDTO,
 } from "./types";
@@ -68,7 +69,23 @@ function toChatMessage(dto: MessageOutDTO, index: number): ChatMessage {
   // "user" | "assistant" and fall back to "assistant" for anything
   // unexpected (e.g. a future "system"/"tool" role) rather than crashing.
   const role = dto.role === "user" ? "user" : "assistant";
-  return { id: `${role}-${index}`, role, content: dto.content };
+  const citations =
+    role === "assistant"
+      ? Array.from(
+          dto.content.matchAll(/\[source:\s*(.+?)(?:\s+p\.(\d+))?\]/g),
+          (match) => ({
+            file: match[1].trim(),
+            page: match[2] ? Number(match[2]) : null,
+            preview: "",
+          }),
+        )
+      : [];
+  return {
+    id: `${role}-${index}`,
+    role,
+    content: dto.content,
+    ...(citations.length ? { citations } : {}),
+  };
 }
 
 /** GET /threads */
@@ -257,6 +274,20 @@ function parseSseFrame(frame: string): StreamEvent | null {
       return typeof data.message === "string"
         ? { type: "activity", message: data.message }
         : null;
+    case "citations":
+      if (!Array.isArray(data.items)) return null;
+      return {
+        type: "citations",
+        items: data.items.filter(
+          (item): item is Citation =>
+            !!item &&
+            typeof item === "object" &&
+            typeof (item as Record<string, unknown>).file === "string" &&
+            ((item as Record<string, unknown>).page === null ||
+              typeof (item as Record<string, unknown>).page === "number") &&
+            typeof (item as Record<string, unknown>).preview === "string",
+        ),
+      };
     case "done":
       return { type: "done" };
     case "error":

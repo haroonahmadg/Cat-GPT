@@ -593,7 +593,7 @@ def _register_chunks(
 
     registry = _load_metadata_registry()
 
-    for chunk in chunks:
+    for chunk_index, chunk in enumerate(chunks):
 
         registry.append(
             {
@@ -602,7 +602,9 @@ def _register_chunks(
                     "page",
                     0,
                 ),
+                "chunk_id": chunk.metadata.get("chunk_id", chunk_index),
                 "text": chunk.page_content,
+                "user_id": chunk.metadata.get("user_id"),
             }
         )
 
@@ -857,8 +859,9 @@ def ingest_file(file_path: str,user_id: str | None = None) -> int:
             "No text chunks could be extracted from this file."
         )
 
-    for chunk in chunks:
+    for chunk_index, chunk in enumerate(chunks):
         chunk.metadata["source"] = source_name
+        chunk.metadata["chunk_id"] = chunk_index
         if user_id:
             chunk.metadata["user_id"] = user_id
 

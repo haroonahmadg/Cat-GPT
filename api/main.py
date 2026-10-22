@@ -1032,6 +1032,7 @@ def send_message_stream(
         """
 
         try:
+            citations: dict[tuple[str, int | None], dict[str, object]] = {}
             for stream_mode, chunk in stream_agent(
                 user_id=user_id,
                 messages=[agent_message],
@@ -1039,6 +1040,21 @@ def send_message_stream(
             ):
 
                 if stream_mode == "custom":
+                    if isinstance(chunk, dict) and chunk.get("event") == "citation":
+                        citation = chunk.get("citation")
+                        if isinstance(citation, dict):
+                            source_file = citation.get("file")
+                            page = citation.get("page")
+                            preview = citation.get("preview")
+                            if isinstance(source_file, str) and source_file.strip():
+                                citation_page = page if isinstance(page, int) else None
+                                key = (source_file, citation_page)
+                                citations[key] = {
+                                    "file": source_file,
+                                    "page": citation_page,
+                                    "preview": preview if isinstance(preview, str) else "",
+                                }
+                        continue
                     label = extract_activity_message(chunk)
                     if label:
                         yield format_sse("activity", {"message": label})
@@ -1056,6 +1072,8 @@ def send_message_stream(
                 if text:
                     yield format_sse("text", {"text": text})
 
+            if citations:
+                yield format_sse("citations", {"items": list(citations.values())})
             yield format_sse("done", {})
 
         except Exception as exc:

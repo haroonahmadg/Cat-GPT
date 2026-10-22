@@ -15,10 +15,17 @@ export type ThreadSummary = {
 
 export type ChatRole = "user" | "assistant";
 
+export type Citation = {
+  file: string;
+  page: number | null;
+  preview: string;
+};
+
 export type ChatMessage = {
   id: string;
   role: ChatRole;
   content: string;
+  citations?: Citation[];
   streaming?: boolean;
   imageUrl?: string;
 };
@@ -82,6 +89,7 @@ export type StreamEvent =
   | { type: "text"; text: string }
   | { type: "activity"; message: string }
   | { type: "image"; url: string }
+  | { type: "citations"; items: Citation[] }
   | { type: "done" }
   | { type: "error"; message: string };
 

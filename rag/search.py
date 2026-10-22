@@ -76,32 +76,34 @@ def search_pdf(
         allow_dangerous_deserialization=True,
     )
 
-    if source_filter:
-        allowed = set(source_filter)
+    allowed_sources = set(source_filter or [])
+    raw_k = k
+    if allowed_sources:
+        # Similarity search ranks before scoping. Fetch enough candidates to
+        # retain relevant chunks from each attached file after filtering.
+        raw_k = min(k * max(len(allowed_sources), 1) * 3, 50)
+    if user_id is not None:
+        # User metadata is part of each ingested document. Over-fetch before
+        # applying it so other users' nearest chunks don't hide this user's.
+        raw_k = min(max(raw_k * 5, k * 5), 100)
 
-        # Over-fetch before filtering, since FAISS's similarity_search
-        # ranks first and only then would filter — pulling k candidates
-        # per allowed source keeps enough results to still return up to
-        # k after narrowing to the allowed filenames.
-        raw_k = min(k * max(len(allowed), 1) * 3, 50)
-
-        candidates = vectorstore.similarity_search(query, k=raw_k)
-
-        documents = [
-            doc
-            for doc in candidates
-            if doc.metadata.get("source") in allowed
-        ][:k]
-    else:
-        documents = vectorstore.similarity_search(query, k=k)
+    candidates = vectorstore.similarity_search(query, k=raw_k)
+    documents = [
+        doc
+        for doc in candidates
+        if (not allowed_sources or doc.metadata.get("source") in allowed_sources)
+        and (user_id is None or doc.metadata.get("user_id") == user_id)
+    ][:k]
 
     results = []
 
     for document in documents:
+        metadata = dict(document.metadata)
+        metadata["preview"] = document.page_content.strip()[:240]
         results.append(
             {
                 "content": document.page_content,
-                "metadata": document.metadata,
+                "metadata": metadata,
             }
         )
 
@@ -179,6 +181,8 @@ def get_document_preview(
                 "metadata": {
                     "source": entry.get("source"),
                     "page": entry.get("page", 0),
+                    "chunk_id": entry.get("chunk_id"),
+                    "preview": text[:240],
                 },
             }
         )
