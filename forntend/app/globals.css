@@ -84,3 +84,54 @@ body {
   background-color: #171719;
   padding: 0.125rem 0.25rem;
 }
+
+.cat-mood {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+}
+
+.cat-mood svg path {
+  fill: none;
+  stroke: #e5a65a;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2;
+}
+
+.cat-mood .cat-tail {
+  transform-origin: 38px 34px;
+}
+
+.cat-mood-thinking .cat-tail,
+.cat-mood-working .cat-tail,
+.cat-mood-happy .cat-tail {
+  animation: cat-tail-sway 0.8s ease-in-out infinite alternate;
+}
+
+.cat-mood-thinking .cat-thought,
+.cat-mood-working .cat-spark {
+  fill: #e5a65a;
+  stroke: #e5a65a;
+}
+
+.cat-mood-happy .cat-mouth,
+.cat-mood-happy .cat-cheer {
+  stroke: #8bd49c;
+}
+
+.cat-mood-error .cat-error {
+  stroke: #f87171;
+}
+
+@keyframes cat-tail-sway {
+  to {
+    transform: rotate(18deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cat-mood .cat-tail {
+    animation: none;
+  }
+}

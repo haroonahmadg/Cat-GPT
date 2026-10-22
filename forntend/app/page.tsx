@@ -5,6 +5,7 @@ import type { ReactNode } from "react";
 import { Volume2, Square, Loader2, Copy, Check, Pencil, RotateCcw, Eye, EyeOff, ImagePlus, MoreHorizontal, Pin, PinOff, Archive, ArchiveRestore, Trash2, Download, PencilLine, FolderClosed } from "lucide-react";
 import { Sidebar, type AppView } from "@/components/Sidebar";
 import { CatLogo } from "@/components/CatLogo";
+import { CatMood } from "@/components/CatMood";
 import { HomeHero } from "@/components/HomeHero";
 import { QuickActions } from "@/components/QuickActions";
 import { ChatInput } from "@/components/ChatInput";
@@ -148,6 +149,7 @@ export default function HomePage() {
     messages,
     messagesLoading,
     isStreaming,
+    catMood,
     resetChatState,
     activityLabel,
     sendError,
@@ -381,6 +383,7 @@ export default function HomePage() {
         {activeView === "chat" && activeThread && (
           <div className="flex h-12 shrink-0 items-center justify-between border-b border-surface-border px-4">
             <h2 className="truncate text-sm font-medium text-white/80">{activeThread.title}</h2>
+            <CatMood mood={catMood} />
             <div className="relative">
               <button
                 type="button"
@@ -530,6 +533,9 @@ export default function HomePage() {
         ) : !hasConversation ? (
           <main className="flex flex-1 flex-col items-center justify-center px-4">
             <div className="w-full max-w-2xl">
+              <div className="mb-3 flex justify-center">
+                <CatMood mood={catMood} />
+              </div>
               <HomeHero />
 
               <ChatInput

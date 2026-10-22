@@ -28,6 +28,7 @@ import {
   FilePayload,
 } from "./types";
 import { getStoredToken } from "./useAuth";
+import type { CatMoodState } from "@/components/CatMood";
 
 export type VoiceStatus = { messageId: string; state: "loading" | "playing" } | null;
 
@@ -41,6 +42,7 @@ export function useChat() {
   const [messagesLoading, setMessagesLoading] = useState(false);
 
   const [isStreaming, setIsStreaming] = useState(false);
+  const [catMood, setCatMood] = useState<CatMoodState>("idle");
   const [activityLabel, setActivityLabel] = useState<string | null>(null);
   const [sendError, setSendError] = useState<string | null>(null);
 
@@ -112,6 +114,7 @@ export function useChat() {
     abortRef.current?.abort();
     stopSpeaking();
     setIsStreaming(false);
+    setCatMood("idle");
     setActivityLabel(null);
     setSendError(null);
     setThreads([]);
@@ -170,6 +173,7 @@ export function useChat() {
     abortRef.current?.abort();
     stopSpeaking();
     setIsStreaming(false);
+    setCatMood("idle");
     setActivityLabel(null);
     setSendError(null);
     setAttachments([]);
@@ -200,6 +204,7 @@ export function useChat() {
     abortRef.current?.abort();
     stopSpeaking();
     setIsStreaming(false);
+    setCatMood("idle");
     setActivityLabel(null);
     setSendError(null);
     setAttachments([]);
@@ -392,6 +397,7 @@ export function useChat() {
       imageAttachments.forEach((img) => URL.revokeObjectURL(img.previewUrl));
       setImageAttachments([]);
       setIsStreaming(true);
+      setCatMood("thinking");
 
       // Tracks whether real assistant text has started arriving for this
       // turn, so the first "text" event can clear any stale activity
@@ -407,6 +413,7 @@ export function useChat() {
         imagePayloads,
         (event) => {
           if (event.type === "text") {
+            setCatMood("working");
             if (!textStarted) {
               textStarted = true;
               setActivityLabel(null);
@@ -436,6 +443,7 @@ export function useChat() {
                 );
               });
           }else if (event.type === "activity") {
+            setCatMood("working");
             // Only shown while no real text has arrived yet for this
             // turn — once textStarted flips true above, later activity
             // events (rare, but possible from a follow-up tool call)
@@ -447,6 +455,7 @@ export function useChat() {
           } else if (event.type === "done") {
             flushReveal(assistantMessage.id);
             setIsStreaming(false);
+            setCatMood("happy");
             setActivityLabel(null);
             setMessages((prev) =>
               prev.map((m) =>
@@ -457,6 +466,7 @@ export function useChat() {
           } else if (event.type === "error") {
             flushReveal(assistantMessage.id);
             setIsStreaming(false);
+            setCatMood("error");
             setActivityLabel(null);
             setSendError(event.message);
           }
@@ -464,6 +474,7 @@ export function useChat() {
         (err) => {
           flushReveal(assistantMessage.id);
           setIsStreaming(false);
+          setCatMood("error");
           setActivityLabel(null);
           setSendError(err.message || "The connection to the assistant was lost.");
         },
@@ -775,6 +786,7 @@ export function useChat() {
     messages,
     messagesLoading,
     isStreaming,
+    catMood,
     activityLabel,
     sendError,
     resetChatState,
