@@ -1288,8 +1288,27 @@ async def upload_files(
 # VOICE
 # ============================================================
 
+ALLOWED_AUDIO_MIME_TYPES = {
+    "audio/webm",
+    "audio/mpeg",
+    "audio/wav",
+    "audio/x-wav",
+    "audio/mp3",
+}
+ALLOWED_AUDIO_EXTENSIONS = {".webm", ".mp3", ".mpeg", ".wav"}
+MAX_AUDIO_BYTES = 10 * 1024 * 1024
+
+
 @app.post("/voice/transcribe", response_model=TranscribeResponse)
 async def voice_transcribe(audio: UploadFile = File(...)) -> TranscribeResponse:
+    content_type = (audio.content_type or "").lower()
+    suffix = Path(audio.filename or "").suffix.lower()
+
+    if content_type not in ALLOWED_AUDIO_MIME_TYPES and suffix not in ALLOWED_AUDIO_EXTENSIONS:
+        raise HTTPException(
+            status_code=400,
+            detail="Unsupported audio format. Please upload webm, mpeg, or wav audio.",
+        )
 
     try:
         audio_bytes = await audio.read()
@@ -1298,8 +1317,19 @@ async def voice_transcribe(audio: UploadFile = File(...)) -> TranscribeResponse:
             status_code=400, detail=f"Could not read the recording: {exc}"
         ) from exc
 
+    if not audio_bytes:
+        raise HTTPException(status_code=400, detail="Audio recording is empty.")
+
+    if len(audio_bytes) > MAX_AUDIO_BYTES:
+        raise HTTPException(
+            status_code=400,
+            detail="Audio recording exceeds the 10 MB limit. Please record a shorter message.",
+        )
+
+    filename = audio.filename or ("audio.webm" if "webm" in content_type else "audio.wav")
+
     try:
-        text = await run_in_threadpool(transcribe_audio, audio_bytes)
+        text = await run_in_threadpool(transcribe_audio, audio_bytes, filename)
 
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -1310,10 +1340,7 @@ async def voice_transcribe(audio: UploadFile = File(...)) -> TranscribeResponse:
     except Exception as exc:
         raise HTTPException(
             status_code=502,
-            detail=(
-                "Could not transcribe this recording "
-                f"({type(exc).__name__}: {exc})."
-            ),
+            detail=f"Speech transcription failed ({type(exc).__name__}): {exc}",
         ) from exc
 
     return TranscribeResponse(text=text)

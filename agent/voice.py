@@ -4,7 +4,10 @@ from gtts import gTTS
 from groq import Groq
 
 
-def transcribe_audio(audio_bytes: bytes) -> str:
+from pathlib import Path
+
+
+def transcribe_audio(audio_bytes: bytes, filename: str = "recording.webm") -> str:
     """Convert user speech audio bytes into text using Groq Whisper."""
     if not audio_bytes:
         raise ValueError("Audio buffer is empty.")
@@ -17,7 +20,8 @@ def transcribe_audio(audio_bytes: bytes) -> str:
 
     client = Groq(api_key=api_key)
 
-    with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as temp_audio:
+    suffix = Path(filename).suffix or ".webm"
+    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as temp_audio:
         temp_audio.write(audio_bytes)
         temp_path = temp_audio.name
 

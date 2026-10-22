@@ -61,6 +61,18 @@ export function ChatInput({
   const imageInputRef = useRef<HTMLInputElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const [recordingSeconds, setRecordingSeconds] = useState(0);
+
+  useEffect(() => {
+    if (!isRecording) {
+      setRecordingSeconds(0);
+      return;
+    }
+    const timer = setInterval(() => {
+      setRecordingSeconds((prev) => prev + 1);
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [isRecording]);
 
   const hasUploadingAttachment = attachments.some((a) => a.status === "uploading");
   const hasFailedAttachment = attachments.some((a) => a.status === "error");
@@ -170,7 +182,9 @@ export function ChatInput({
               />
             ))}
           </div>
-          <span className="text-xs text-white/70">Recording…</span>
+          <span className="text-xs text-white/70">
+            Recording… {Math.floor(recordingSeconds / 60)}:{(recordingSeconds % 60).toString().padStart(2, "0")}
+          </span>
           <style jsx>{`
             @keyframes recording-wave {
               0%, 100% { transform: scaleY(0.4); }
