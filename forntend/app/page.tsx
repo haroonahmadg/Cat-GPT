@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import type { ReactNode } from "react";
 import { Volume2, Square, Loader2, Copy, Check, Pencil, RotateCcw, Eye, EyeOff, ImagePlus, MoreHorizontal, Pin, PinOff, Archive, ArchiveRestore, Trash2, Download, PencilLine, FolderClosed } from "lucide-react";
 import { Sidebar, type AppView } from "@/components/Sidebar";
 import { CatLogo } from "@/components/CatLogo";
@@ -13,10 +14,28 @@ import { setUnauthorizedHandler } from "@/lib/api";
 import { fetchGeneratedImage, generateImage, listLibraryMedia } from "@/lib/api";
 import type { LibraryMediaDTO } from "@/lib/types";
 import ReactMarkdown from "react-markdown";
-import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
-import { vscDarkPlus } from "react-syntax-highlighter/dist/cjs/styles/prism";
+import remarkGfm from "remark-gfm";
+import rehypeHighlight from "rehype-highlight";
+import type { Components } from "react-markdown";
 
-function CodeBlock({ language, code }: { language: string; code: string }) {
+function markdownText(node: ReactNode): string {
+  if (typeof node === "string" || typeof node === "number") return String(node);
+  if (Array.isArray(node)) return node.map(markdownText).join("");
+  if (node && typeof node === "object" && "props" in node) {
+    return markdownText((node.props as { children?: ReactNode }).children);
+  }
+  return "";
+}
+
+function CodeBlock({
+  language,
+  code,
+  children,
+}: {
+  language: string;
+  code: string;
+  children: ReactNode;
+}) {
   const [copied, setCopied] = useState(false);
 
   const handleCopy = async () => {
@@ -43,16 +62,34 @@ function CodeBlock({ language, code }: { language: string; code: string }) {
           {copied ? "Copied" : "Copy"}
         </button>
       </div>
-      <SyntaxHighlighter
-        language={language || "text"}
-        style={vscDarkPlus}
-        customStyle={{ margin: 0, background: "transparent", fontSize: "0.85rem" }}
-      >
-        {code}
-      </SyntaxHighlighter>
+      <pre className="overflow-x-auto p-3 text-sm">{children}</pre>
     </div>
   );
 }
+
+const markdownComponents: Components = {
+  pre({ children }) {
+    const child = Array.isArray(children) ? children[0] : children;
+    const className =
+      child && typeof child === "object" && "props" in child
+        ? (child.props as { className?: string }).className ?? ""
+        : "";
+    const language = /language-([\w-]+)/.exec(className)?.[1] ?? "";
+    const code = markdownText(children).replace(/\n$/, "");
+    return (
+      <CodeBlock language={language || "code"} code={code}>
+        {children}
+      </CodeBlock>
+    );
+  },
+  code({ className, children, ...props }) {
+    return (
+      <code className={className} {...props}>
+        {children}
+      </code>
+    );
+  },
+};
 
 // Shown inside a streaming assistant bubble before any real text has
 // arrived yet — either live backend activity ("Searching the web...")
@@ -575,27 +612,13 @@ export default function HomePage() {
                                   <span className="text-xs font-medium text-white/55">Cat GPT</span>
                                 </span>
                               )}
-                              {message.content ? (
+                              {message.content && isUser ? (
+                                <p className="whitespace-pre-wrap">{message.content}</p>
+                              ) : message.content ? (
                                 <ReactMarkdown
-                                  components={{
-                                    code({ className, children, ...props }: any) {
-                                      const match = /language-(\w+)/.exec(className || "");
-                                      const codeText = String(children).replace(/\n$/, "");
-                                      const isBlock = Boolean(match) || codeText.includes("\n");
-
-                                      if (!isBlock) {
-                                        return (
-                                          <code className="rounded bg-surface px-1 py-0.5" {...props}>
-                                            {children}
-                                          </code>
-                                        );
-                                      }
-
-                                      return (
-                                        <CodeBlock language={match?.[1] ?? ""} code={codeText} />
-                                      );
-                                    },
-                                  }}
+                                  remarkPlugins={[remarkGfm]}
+                                  rehypePlugins={[rehypeHighlight]}
+                                  components={markdownComponents}
                                 >
                                   {message.content}
                                 </ReactMarkdown>

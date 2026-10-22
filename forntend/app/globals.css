@@ -26,3 +26,61 @@ body {
 .thin-scrollbar::-webkit-scrollbar-track {
   background-color: transparent;
 }
+
+.prose pre {
+  overflow-x: auto;
+  border: 1px solid #34343a;
+  border-radius: 0.75rem;
+  background: #171719;
+  padding: 0.875rem;
+}
+
+.prose pre code {
+  background: transparent;
+  padding: 0;
+}
+
+.prose .hljs-comment,
+.prose .hljs-quote {
+  color: #8b949e;
+}
+
+.prose .hljs-keyword,
+.prose .hljs-selector-tag,
+.prose .hljs-literal,
+.prose .hljs-name {
+  color: #ff7b72;
+}
+
+.prose .hljs-string,
+.prose .hljs-title,
+.prose .hljs-section,
+.prose .hljs-attribute,
+.prose .hljs-template-tag,
+.prose .hljs-template-variable {
+  color: #a5d6ff;
+}
+
+.prose .hljs-number,
+.prose .hljs-symbol,
+.prose .hljs-bullet,
+.prose .hljs-link {
+  color: #79c0ff;
+}
+
+.prose .hljs-function,
+.prose .hljs-title.function_ {
+  color: #d2a8ff;
+}
+
+.prose .hljs-built_in,
+.prose .hljs-type,
+.prose .hljs-params {
+  color: #ffa657;
+}
+
+.prose :not(pre) > code {
+  border-radius: 0.25rem;
+  background-color: #171719;
+  padding: 0.125rem 0.25rem;
+}
