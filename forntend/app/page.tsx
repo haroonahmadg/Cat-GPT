@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
-import { Volume2, Square, Loader2, Copy, Check, Pencil, RotateCcw, Eye, EyeOff, ImagePlus, MoreHorizontal, Pin, PinOff, Archive, ArchiveRestore, Trash2, Download, PencilLine, FolderClosed } from "lucide-react";
+import { Volume2, Square, Loader2, Copy, Check, Pencil, RotateCcw, Eye, EyeOff, ImagePlus, MoreHorizontal, Pin, PinOff, Archive, ArchiveRestore, Trash2, Download, Printer, PencilLine, FolderClosed } from "lucide-react";
 import { Sidebar, type AppView } from "@/components/Sidebar";
 import { CatLogo } from "@/components/CatLogo";
 import { CatMood } from "@/components/CatMood";
@@ -173,9 +173,18 @@ export default function HomePage() {
     voiceStatus,
     speakMessage,
     exportCurrentThread,
+    exportThreadById,
     editLastMessage,
     retryLastMessage,
   } = useChat();
+
+  const openPrintView = (threadId: string) => {
+    window.open(
+      `/threads/${encodeURIComponent(threadId)}/print`,
+      "_blank",
+      "noopener,noreferrer",
+    );
+  };
 
   const previousUserKey = useRef<string | null>(null);
 
@@ -371,6 +380,8 @@ export default function HomePage() {
         onDeleteThread={removeThread}
         onRenameThread={renameThread}
         onToggleArchive={toggleArchive}
+        onExportThread={(threadId) => void exportThreadById(threadId)}
+        onPrintThread={openPrintView}
         onExport={exportCurrentThread}
         onLogout={logout}
         canExport={hasConversation}
@@ -414,8 +425,11 @@ export default function HomePage() {
                     {activeThread.archived ? <ArchiveRestore size={14} /> : <Archive size={14} />}
                     {activeThread.archived ? "Unarchive chat" : "Archive chat"}
                   </button>
-                  <button onClick={() => { void exportCurrentThread(); setChatMenuOpen(false); }} className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-surface-hover">
+                  <button onClick={() => { void exportThreadById(activeThread.threadId); setChatMenuOpen(false); }} className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-surface-hover">
                     <Download size={14} /> Export chat
+                  </button>
+                  <button onClick={() => { openPrintView(activeThread.threadId); setChatMenuOpen(false); }} className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-surface-hover">
+                    <Printer size={14} /> Print / PDF
                   </button>
                   <div className="my-1 border-t border-surface-border" />
                   <button

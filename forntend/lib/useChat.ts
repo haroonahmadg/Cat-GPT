@@ -708,16 +708,19 @@ export function useChat() {
 
   // -------------------- Export --------------------
 
-  const exportCurrentThread = useCallback(async () => {
-    if (!activeThreadId) return;
+  const exportThreadById = useCallback(async (threadId: string) => {
     try {
-      await apiExportThread(activeThreadId);
+      await apiExportThread(threadId);
     } catch (err) {
       setSendError(
         err instanceof ApiError ? err.message : "Couldn't export this chat.",
       );
     }
-  }, [activeThreadId]);
+  }, []);
+
+  const exportCurrentThread = useCallback(() => {
+    if (activeThreadId) void exportThreadById(activeThreadId);
+  }, [activeThreadId, exportThreadById]);
 
   // -------------------- Edit last message (prefill, don't resend) --------------------
 
@@ -811,6 +814,7 @@ export function useChat() {
     speakMessage,
     stopSpeaking,
     exportCurrentThread,
+    exportThreadById,
     editLastMessage,
     retryLastMessage,
   };

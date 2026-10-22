@@ -24,6 +24,7 @@ import base64
 import binascii
 import re
 import uuid
+from datetime import date
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
@@ -820,22 +821,39 @@ def edit_last_message(thread_id: str, request: Request) -> EditResponse:
 
 
 @app.get("/threads/{thread_id}/export")
+@app.get("/threads/{thread_id}/export.md")
 def export_thread(thread_id: str, request: Request) -> Response:
 
     if not thread_id.strip():
         raise HTTPException(status_code=400, detail="A valid thread_id is required.")
 
+    user_id = request.state.user_id
+    try:
+        owned_threads = get_all_saved_threads(user_id)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500, detail=f"Could not verify thread ownership: {exc}"
+        ) from exc
+    if thread_id not in owned_threads:
+        raise HTTPException(status_code=404, detail="Conversation not found.")
+
     try:
         history = get_thread_history(
             thread_id=thread_id,
-            user_id=request.state.user_id,
+            user_id=user_id,
         )
     except Exception as exc:
         raise HTTPException(
             status_code=500, detail=f"Could not load thread history: {exc}"
         ) from exc
 
-    lines = ["# AI Assistant conversation", ""]
+    title = get_renamed_titles(user_id).get(thread_id, owned_threads[thread_id])
+    lines = [
+        f"# {title}",
+        "",
+        f"_Exported {date.today().isoformat()}_",
+        "",
+    ]
 
     if not history:
         lines.append("_This conversation has no messages yet._")
@@ -847,7 +865,7 @@ def export_thread(thread_id: str, request: Request) -> Response:
             continue
 
         speaker = "You" if message.get("role") == "user" else "Assistant"
-        lines.extend([f"**{speaker}:**", "", content, ""])
+        lines.extend([f"## {speaker}", "", content, ""])
 
     transcript = "\n".join(lines).strip() + "\n"
 

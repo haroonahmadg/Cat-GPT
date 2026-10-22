@@ -135,3 +135,35 @@ body {
     animation: none;
   }
 }
+
+.print-page .print-transcript a {
+  color: #1d4ed8;
+}
+
+@media print {
+  html,
+  body {
+    height: auto;
+    background: #fff !important;
+    color: #111827 !important;
+  }
+
+  .print-page {
+    min-height: 0 !important;
+    padding: 0 !important;
+  }
+
+  .print-transcript {
+    max-width: none !important;
+    color: #111827 !important;
+    font-size: 11pt;
+  }
+
+  .print-transcript pre {
+    white-space: pre-wrap;
+  }
+
+  .no-print {
+    display: none !important;
+  }
+}

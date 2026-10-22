@@ -22,6 +22,7 @@ import {
   ChevronDown,
   ChevronRight,
   Download,
+  Printer,
   LogOut,
 } from "lucide-react";
 import clsx from "clsx";
@@ -53,6 +54,8 @@ interface SidebarProps {
   onDeleteThread: (threadId: string) => void;
   onRenameThread: (threadId: string, title: string) => void;
   onToggleArchive: (threadId: string) => void;
+  onExportThread: (threadId: string) => void;
+  onPrintThread: (threadId: string) => void;
   onExport: () => void;
   onLogout: () => void;
   canExport: boolean;
@@ -74,6 +77,8 @@ export function Sidebar({
   onDeleteThread,
   onRenameThread,
   onToggleArchive,
+  onExportThread,
+  onPrintThread,
   onExport,
   onLogout,
   canExport,
@@ -217,6 +222,8 @@ export function Sidebar({
                 onDeleteThread={onDeleteThread}
                 onRenameThread={onRenameThread}
                 onToggleArchive={onToggleArchive}
+                onExportThread={onExportThread}
+                onPrintThread={onPrintThread}
               />
             )}
             <ThreadGroup
@@ -228,6 +235,8 @@ export function Sidebar({
               onDeleteThread={onDeleteThread}
               onRenameThread={onRenameThread}
               onToggleArchive={onToggleArchive}
+              onExportThread={onExportThread}
+              onPrintThread={onPrintThread}
             />
             {archived.length > 0 && (
               <ArchivedGroup
@@ -238,6 +247,8 @@ export function Sidebar({
                 onDeleteThread={onDeleteThread}
                 onRenameThread={onRenameThread}
                 onToggleArchive={onToggleArchive}
+                onExportThread={onExportThread}
+                onPrintThread={onPrintThread}
               />
             )}
           </>
@@ -347,6 +358,8 @@ function ArchivedGroup({
   onDeleteThread,
   onRenameThread,
   onToggleArchive,
+  onExportThread,
+  onPrintThread,
 }: {
   threads: ThreadSummary[];
   activeThreadId: string | null;
@@ -355,6 +368,8 @@ function ArchivedGroup({
   onDeleteThread: (threadId: string) => void;
   onRenameThread: (threadId: string, title: string) => void;
   onToggleArchive: (threadId: string) => void;
+  onExportThread: (threadId: string) => void;
+  onPrintThread: (threadId: string) => void;
 }) {
   const [open, setOpen] = useState(false);
 
@@ -378,6 +393,8 @@ function ArchivedGroup({
           onDeleteThread={onDeleteThread}
           onRenameThread={onRenameThread}
           onToggleArchive={onToggleArchive}
+          onExportThread={onExportThread}
+          onPrintThread={onPrintThread}
         />
       )}
     </div>
@@ -393,6 +410,8 @@ function ThreadGroup({
   onDeleteThread,
   onRenameThread,
   onToggleArchive,
+  onExportThread,
+  onPrintThread,
 }: {
   label: string;
   threads: ThreadSummary[];
@@ -402,6 +421,8 @@ function ThreadGroup({
   onDeleteThread: (threadId: string) => void;
   onRenameThread: (threadId: string, title: string) => void;
   onToggleArchive: (threadId: string) => void;
+  onExportThread: (threadId: string) => void;
+  onPrintThread: (threadId: string) => void;
 }) {
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -486,6 +507,8 @@ function ThreadGroup({
                 onDelete={handleDelete}
                 onRename={() => startEditing(thread)}
                 onToggleArchive={() => onToggleArchive(thread.threadId)}
+                onExport={() => onExportThread(thread.threadId)}
+                onPrint={() => onPrintThread(thread.threadId)}
               />
             )}
           </div>
@@ -502,6 +525,8 @@ function ThreadMenu({
   onDelete,
   onRename,
   onToggleArchive,
+  onExport,
+  onPrint,
 }: {
   thread: ThreadSummary;
   onClose: () => void;
@@ -509,6 +534,8 @@ function ThreadMenu({
   onDelete: (thread: ThreadSummary) => void;
   onRename: () => void;
   onToggleArchive: () => void;
+  onExport: () => void;
+  onPrint: () => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
 
@@ -553,6 +580,30 @@ function ThreadMenu({
       >
         {thread.archived ? <ArchiveRestore size={14} /> : <Archive size={14} />}
         {thread.archived ? "Unarchive" : "Archive"}
+      </button>
+
+      <div className="my-1 border-t border-surface-border" />
+
+      <button
+        onClick={() => {
+          onExport();
+          onClose();
+        }}
+        className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-white/90 hover:bg-surface-hover"
+      >
+        <Download size={14} />
+        Download .md
+      </button>
+
+      <button
+        onClick={() => {
+          onPrint();
+          onClose();
+        }}
+        className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-white/90 hover:bg-surface-hover"
+      >
+        <Printer size={14} />
+        Print / PDF
       </button>
 
       <div className="my-1 border-t border-surface-border" />

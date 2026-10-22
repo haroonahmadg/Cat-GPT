@@ -409,8 +409,8 @@ export async function speakText(text: string, signal?: AbortSignal): Promise<Blo
  * returned Markdown transcript. Reads the filename from
  * Content-Disposition when present, falling back to a generic name.
  */
-export async function exportThread(threadId: string): Promise<void> {
-  const res = await fetch(`${API_BASE_URL}/threads/${threadId}/export`, {
+export async function fetchThreadExportMarkdown(threadId: string): Promise<string> {
+  const res = await fetch(`${API_BASE_URL}/threads/${encodeURIComponent(threadId)}/export.md`, {
     headers: authHeaders(),
   });
 
@@ -428,15 +428,16 @@ export async function exportThread(threadId: string): Promise<void> {
     throw new ApiError(message, res.status);
   }
 
-  const blob = await res.blob();
-  const disposition = res.headers.get("Content-Disposition") ?? "";
-  const match = disposition.match(/filename="?([^"]+)"?/);
-  const filename = match?.[1] ?? `chat_${threadId.slice(0, 8)}.md`;
+  return res.text();
+}
 
+export async function exportThread(threadId: string): Promise<void> {
+  const markdown = await fetchThreadExportMarkdown(threadId);
+  const blob = new Blob([markdown], { type: "text/markdown;charset=utf-8" });
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
-  link.download = filename;
+  link.download = `chat_${threadId.slice(0, 8)}.md`;
   link.click();
   URL.revokeObjectURL(url);
 }
