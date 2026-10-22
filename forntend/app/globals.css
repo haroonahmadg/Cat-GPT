@@ -41,14 +41,17 @@ body {
 }
 
 .prose .hljs-comment,
-.prose .hljs-quote {
+.prose .hljs-quote,
+.prose .hljs-meta {
   color: #8b949e;
 }
 
 .prose .hljs-keyword,
 .prose .hljs-selector-tag,
 .prose .hljs-literal,
-.prose .hljs-name {
+.prose .hljs-name,
+.prose .hljs-tag,
+.prose .hljs-operator {
   color: #ff7b72;
 }
 
@@ -57,7 +60,8 @@ body {
 .prose .hljs-section,
 .prose .hljs-attribute,
 .prose .hljs-template-tag,
-.prose .hljs-template-variable {
+.prose .hljs-template-variable,
+.prose .hljs-addition {
   color: #a5d6ff;
 }
 
@@ -75,8 +79,15 @@ body {
 
 .prose .hljs-built_in,
 .prose .hljs-type,
-.prose .hljs-params {
+.prose .hljs-params,
+.prose .hljs-variable,
+.prose .hljs-attr {
   color: #ffa657;
+}
+
+.prose .hljs-deletion {
+  color: #ffa198;
+  background-color: #490202;
 }
 
 .prose :not(pre) > code {

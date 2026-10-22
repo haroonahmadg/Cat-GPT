@@ -63,7 +63,7 @@ function CodeBlock({
           {copied ? "Copied" : "Copy"}
         </button>
       </div>
-      <pre className="overflow-x-auto p-3 text-sm">{children}</pre>
+      <pre className="overflow-x-auto p-3 text-sm !border-0 !rounded-none !bg-transparent">{children}</pre>
     </div>
   );
 }
@@ -656,6 +656,30 @@ export default function HomePage() {
                           )}
                         </div>
                         </div>
+
+                        {!isUser && !!message.citations?.length && (
+                          <details className="mt-1 max-w-[80%] self-start text-xs text-white/65">
+                            <summary className="cursor-pointer rounded-full border border-surface-border px-2.5 py-1 hover:bg-surface-hover">
+                              Sources ({message.citations.length})
+                            </summary>
+                            <div className="mt-1 grid gap-1 rounded-xl border border-surface-border bg-surface-raised p-2">
+                              {message.citations.map((citation, index) => (
+                                <details
+                                  key={`${citation.file}-${citation.page ?? "?"}-${index}`}
+                                  className="rounded-lg px-2 py-1 hover:bg-surface-hover"
+                                >
+                                  <summary className="cursor-pointer">
+                                    {citation.file}
+                                    {citation.page !== null ? ` · p.${citation.page}` : ""}
+                                  </summary>
+                                  <p className="mt-1 whitespace-pre-wrap text-white/80">
+                                    {citation.preview || "Citation reference from this response."}
+                                  </p>
+                                </details>
+                              ))}
+                            </div>
+                          </details>
+                        )}
 
                         {!message.streaming && isUser && (
                           <div className="mt-1 flex max-w-[80%] self-end gap-1">
