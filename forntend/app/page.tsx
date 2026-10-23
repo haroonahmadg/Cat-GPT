@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
+import clsx from "clsx";
 import { Volume2, Square, Loader2, Copy, Check, Pencil, RotateCcw, Eye, EyeOff, ImagePlus, MoreHorizontal, Pin, PinOff, Archive, ArchiveRestore, Trash2, Download, Printer, PencilLine, FolderClosed } from "lucide-react";
 import { Sidebar, type AppView } from "@/components/Sidebar";
 import { CatLogo } from "@/components/CatLogo";
@@ -176,6 +177,8 @@ export default function HomePage() {
     exportThreadById,
     editLastMessage,
     retryLastMessage,
+    researchMode,
+    setResearchMode,
   } = useChat();
 
   const openPrintView = (threadId: string) => {

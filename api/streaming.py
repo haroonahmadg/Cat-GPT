@@ -32,7 +32,7 @@ def extract_updates_text(node_update: Any) -> str:
     if not isinstance(node_update, dict):
         return ""
 
-    assistant_update = node_update.get("assistant")
+    assistant_update = node_update.get("assistant") or node_update.get("research_synthesize")
 
     if not isinstance(assistant_update, dict):
         return ""

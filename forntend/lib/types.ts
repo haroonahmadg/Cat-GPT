@@ -26,6 +26,7 @@ export type ChatMessage = {
   role: ChatRole;
   content: string;
   citations?: Citation[];
+  plan?: { steps: string[]; completed?: number };
   streaming?: boolean;
   imageUrl?: string;
 };
@@ -90,6 +91,7 @@ export type StreamEvent =
   | { type: "activity"; message: string }
   | { type: "image"; url: string }
   | { type: "citations"; items: Citation[] }
+  | { type: "plan"; steps: string[] }
   | { type: "done" }
   | { type: "error"; message: string };
 

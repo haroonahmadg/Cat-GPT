@@ -288,6 +288,12 @@ function parseSseFrame(frame: string): StreamEvent | null {
             typeof (item as Record<string, unknown>).preview === "string",
         ),
       };
+    case "plan":
+      if (!Array.isArray(data.steps)) return null;
+      return {
+        type: "plan",
+        steps: data.steps.filter((s): s is string => typeof s === "string"),
+      };
     case "done":
       return { type: "done" };
     case "error":
@@ -316,6 +322,7 @@ export function streamMessage(
   images: { image_bytes: string; image_type: string; filename: string }[],
   onEvent: (event: StreamEvent) => void,
   onError: (error: Error) => void,
+  researchMode: boolean = false,
 ): { abort: () => void } {
   const controller = new AbortController();
 
@@ -326,7 +333,12 @@ export function streamMessage(
         {
           method: "POST",
           headers: authHeaders({ "Content-Type": "application/json" }),
-          body: JSON.stringify({ content, files, images }),
+          body: JSON.stringify({
+            content,
+            files,
+            images,
+            research_mode: researchMode,
+          }),
           signal: controller.signal,
         },
       );

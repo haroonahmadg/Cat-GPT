@@ -93,6 +93,7 @@ class SendMessageRequest(BaseModel):
     content: str = ""
     images: list[ImagePayload] = Field(default_factory=list)
     files: list[FilePayload] = Field(default_factory=list)
+    research_mode: bool = False
 
 
 class GenerateImageRequest(BaseModel):

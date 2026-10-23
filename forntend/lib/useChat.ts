@@ -51,6 +51,7 @@ export function useChat() {
   const [isRecording, setIsRecording] = useState(false);
   const [voiceError, setVoiceError] = useState<string | null>(null);
   const [voiceStatus, setVoiceStatus] = useState<VoiceStatus>(null);
+  const [researchMode, setResearchMode] = useState(false);
 
   const abortRef = useRef<{ abort: () => void } | null>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
@@ -421,6 +422,14 @@ export function useChat() {
             pendingTextRef.current[assistantMessage.id] =
               (pendingTextRef.current[assistantMessage.id] ?? "") + event.text;
             startReveal(assistantMessage.id);
+          } else if (event.type === "plan") {
+            setMessages((prev) =>
+              prev.map((m) =>
+                m.id === assistantMessage.id
+                  ? { ...m, plan: { steps: event.steps, completed: 0 } }
+                  : m,
+              ),
+            );
           } else if (event.type === "image") {
             const sessionToken = getStoredToken();
             void fetchGeneratedImage(event.url)
@@ -450,13 +459,24 @@ export function useChat() {
                   : m,
               ),
             );
-          }else if (event.type === "activity") {
+          } else if (event.type === "activity") {
             setCatMood("working");
-            // Only shown while no real text has arrived yet for this
-            // turn — once textStarted flips true above, later activity
-            // events (rare, but possible from a follow-up tool call)
-            // are intentionally not re-shown, since the reply itself
-            // is already the more relevant thing on screen by then.
+            setMessages((prev) =>
+              prev.map((m) => {
+                if (m.id === assistantMessage.id && m.plan) {
+                  const currentCompleted = m.plan.completed ?? 0;
+                  const nextCompleted = Math.min(
+                    m.plan.steps.length,
+                    currentCompleted + 1,
+                  );
+                  return {
+                    ...m,
+                    plan: { ...m.plan, completed: nextCompleted },
+                  };
+                }
+                return m;
+              }),
+            );
             if (!textStarted) {
               setActivityLabel(event.message);
             }
@@ -467,7 +487,20 @@ export function useChat() {
             setActivityLabel(null);
             setMessages((prev) =>
               prev.map((m) =>
-                m.id === assistantMessage.id ? { ...m, streaming: false } : m,
+                m.id === assistantMessage.id
+                  ? {
+                      ...m,
+                      streaming: false,
+                      ...(m.plan
+                        ? {
+                            plan: {
+                              ...m.plan,
+                              completed: m.plan.steps.length,
+                            },
+                          }
+                        : {}),
+                    }
+                  : m,
               ),
             );
             refreshThreads();
@@ -486,6 +519,7 @@ export function useChat() {
           setActivityLabel(null);
           setSendError(err.message || "The connection to the assistant was lost.");
         },
+        researchMode,
       );
     },
     [activeThreadId, attachments, imageAttachments, refreshThreads, startReveal, flushReveal],
@@ -825,5 +859,7 @@ export function useChat() {
     exportThreadById,
     editLastMessage,
     retryLastMessage,
+    researchMode,
+    setResearchMode,
   };
 }
