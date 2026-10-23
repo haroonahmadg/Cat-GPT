@@ -22,3 +22,5 @@ forntend/.env*.local
 *.sqlite
 test_image.png
 body.json
+
+Cat_GPT_Project_Deep_Dive.pdf
