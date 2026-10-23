@@ -322,6 +322,7 @@ export function streamMessage(
   images: { image_bytes: string; image_type: string; filename: string }[],
   onEvent: (event: StreamEvent) => void,
   onError: (error: Error) => void,
+  researchMode: boolean = false,
 ): { abort: () => void } {
   const controller = new AbortController();
 
