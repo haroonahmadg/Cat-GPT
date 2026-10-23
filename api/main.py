@@ -22,6 +22,7 @@ from __future__ import annotations
 import math
 import base64
 import binascii
+import logging
 import re
 import uuid
 from datetime import date
@@ -126,6 +127,25 @@ from api.streaming import (
     format_sse,
 )
 
+logger = logging.getLogger(__name__)
+MAX_UPLOAD_REQUEST_BYTES = int(
+    (MAX_FILE_MB * MAX_UPLOAD_FILES + 1) * 1024 * 1024
+)
+
+
+def _upload_content_length_error(content_length: str | None) -> tuple[int, str] | None:
+    if content_length is None:
+        return None
+    try:
+        request_size = int(content_length)
+    except ValueError:
+        return 400, "The upload request has an invalid content length."
+    if request_size < 0:
+        return 400, "The upload request has an invalid content length."
+    if request_size > MAX_UPLOAD_REQUEST_BYTES:
+        return 413, "The total upload size exceeds the allowed limit."
+    return None
+
 
 # ============================================================
 # APP SETUP
@@ -206,6 +226,15 @@ class AuthMiddleware(BaseHTTPMiddleware):
             )
 
         request.state.user_id = user_id
+
+        if path == "/files/upload":
+            size_error = _upload_content_length_error(
+                request.headers.get("content-length")
+            )
+            if size_error:
+                status_code, detail = size_error
+                return JSONResponse({"detail": detail}, status_code=status_code)
+
         return await call_next(request)
 
 
@@ -632,29 +661,17 @@ def list_threads(request: Request) -> list[ThreadSummary]:
     user_id = request.state.user_id
 
     try:
-        threads = get_all_saved_threads(user_id)
-    except Exception:
-        threads = {}
-
-    try:
+        threads = get_all_saved_threads(user_id, raise_errors=True)
         deleted = get_deleted_threads(user_id)
-    except Exception:
-        deleted = set()
-
-    try:
         pinned = get_pinned_threads(user_id)
-    except Exception:
-        pinned = set()
-
-    try:
         renamed = get_renamed_titles(user_id)
-    except Exception:
-        renamed = {}
-
-    try:
         archived = get_archived_threads(user_id)
-    except Exception:
-        archived = set()
+    except Exception as exc:
+        logger.exception("Could not load the authenticated user's thread list.")
+        raise HTTPException(
+            status_code=500,
+            detail="Could not load conversations right now.",
+        ) from exc
 
     return [
         ThreadSummary(
@@ -1082,14 +1099,15 @@ def send_message_stream(
                 yield format_sse("citations", {"items": list(citations.values())})
             yield format_sse("done", {})
 
-        except Exception as exc:
+        except Exception:
             # Validation errors from parse_input_messages, Groq/network
             # failures not already caught inside assistant_node, etc.
             # Never let an exception crash the HTTP response silently —
             # always tell the client the turn failed.
+            logger.exception("Agent response streaming failed.")
             yield format_sse(
                 "error",
-                {"message": f"{type(exc).__name__}: {exc}"},
+                {"message": "An unexpected upstream error occurred."},
             )
 
     return StreamingResponse(
@@ -1185,6 +1203,13 @@ async def upload_files(
             detail=f"You can upload at most {MAX_UPLOAD_FILES} files at once.",
         )
 
+    size_error = _upload_content_length_error(
+        request.headers.get("content-length")
+    )
+    if size_error:
+        status_code, detail = size_error
+        raise HTTPException(status_code=status_code, detail=detail)
+
     results: list[UploadedFileResult] = []
 
     for uploaded_file in files:
@@ -1274,12 +1299,13 @@ async def upload_files(
                 )
             )
 
-        except Exception as exc:
+        except Exception:
+            logger.exception("Unexpected error while ingesting an uploaded file.")
             results.append(
                 UploadedFileResult(
                     filename=filename,
                     file_path=str(saved_path),
-                    error=f"Unexpected error: {type(exc).__name__}: {exc}",
+                    error="An unexpected upstream error occurred.",
                     progress=progress_log,
                 )
             )
@@ -1341,12 +1367,17 @@ async def voice_transcribe(audio: UploadFile = File(...)) -> TranscribeResponse:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     except RuntimeError as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
-
-    except Exception as exc:
+        logger.exception("Speech transcription failed.")
         raise HTTPException(
             status_code=502,
-            detail=f"Speech transcription failed ({type(exc).__name__}): {exc}",
+            detail="An unexpected upstream error occurred.",
+        ) from exc
+
+    except Exception as exc:
+        logger.exception("Speech transcription failed.")
+        raise HTTPException(
+            status_code=502,
+            detail="An unexpected upstream error occurred.",
         ) from exc
 
     return TranscribeResponse(text=text)
@@ -1367,12 +1398,10 @@ async def voice_speak(request: SpeakRequest) -> Response:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     except Exception as exc:
+        logger.exception("Speech generation failed.")
         raise HTTPException(
             status_code=502,
-            detail=(
-                "Could not generate audio "
-                f"({type(exc).__name__}: {exc})."
-            ),
+            detail="An unexpected upstream error occurred.",
         ) from exc
 
     if not audio_bytes:

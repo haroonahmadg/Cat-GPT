@@ -140,4 +140,4 @@ class TranscribeResponse(BaseModel):
 
 
 class SpeakRequest(BaseModel):
-    text: str
+    text: str = Field(max_length=5000)

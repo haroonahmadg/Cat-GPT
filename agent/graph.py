@@ -1946,7 +1946,11 @@ def _generate_thread_title(text: str, max_length: int = 40) -> str:
 # ============================================================
 
 
-def get_all_saved_threads(user_id: str) -> dict[str, str]:
+def get_all_saved_threads(
+    user_id: str,
+    *,
+    raise_errors: bool = False,
+) -> dict[str, str]:
     """
     Return all saved threads belonging to this user. Keys are the
     RAW (non-namespaced) thread_id — the frontend never sees the
@@ -1973,6 +1977,11 @@ def get_all_saved_threads(user_id: str) -> dict[str, str]:
 
             raw_thread_id = namespaced_thread_id[len(prefix):]
 
+            # Codex conversations share the user-scoped checkpoint store but
+            # must not appear in ordinary chat lists.
+            if raw_thread_id.startswith("codex-"):
+                continue
+
             if raw_thread_id in threads:
                 continue
 
@@ -1994,6 +2003,8 @@ def get_all_saved_threads(user_id: str) -> dict[str, str]:
         return threads
 
     except Exception:
+        if raise_errors:
+            raise
         return {}
 
     finally:

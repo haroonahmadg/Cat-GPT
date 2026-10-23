@@ -101,4 +101,5 @@ def test_voice_transcribe_groq_failure(voice_client, monkeypatch):
     files = {"audio": ("recording.webm", b"valid-webm-audio-bytes", "audio/webm")}
     res = client.post("/voice/transcribe", files=files, headers=headers)
     assert res.status_code in (500, 502)
-    assert "failed" in res.json()["detail"].lower() or "outage" in res.json()["detail"].lower()
+    assert res.json()["detail"] == "An unexpected upstream error occurred."
+    assert "Groq API rate limit or outage" not in res.json()["detail"]

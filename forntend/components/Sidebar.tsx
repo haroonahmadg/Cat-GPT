@@ -5,8 +5,6 @@ import {
   Image as ImageIcon,
   Library,
   Clock,
-  Puzzle,
-  FolderClosed,
   Terminal,
   MoreHorizontal,
   PanelLeftClose,
@@ -22,7 +20,6 @@ import {
   ChevronDown,
   ChevronRight,
   Download,
-  Printer,
   LogOut,
 } from "lucide-react";
 import clsx from "clsx";
@@ -30,15 +27,13 @@ import { IconButton } from "@/components/ui/icon-button";
 import { ThreadSummary } from "@/lib/types";
 import { CatLogo } from "@/components/CatLogo";
 
-export type AppView = "chat" | "images" | "library";
+export type AppView = "chat" | "images" | "library" | "scheduled" | "codex";
 
 const NAV_ITEMS = [
-  { label: "Images", icon: ImageIcon },
-  { label: "Library", icon: Library },
-  { label: "Scheduled", icon: Clock },
-  { label: "Plugins", icon: Puzzle },
-  { label: "Projects", icon: FolderClosed },
-  { label: "Codex", icon: Terminal },
+  { label: "Images", icon: ImageIcon, view: "images" as const },
+  { label: "Library", icon: Library, view: "library" as const },
+  { label: "Scheduled", icon: Clock, view: "scheduled" as const },
+  { label: "Codex", icon: Terminal, view: "codex" as const },
 ];
 
 interface SidebarProps {
@@ -54,8 +49,7 @@ interface SidebarProps {
   onDeleteThread: (threadId: string) => void;
   onRenameThread: (threadId: string, title: string) => void;
   onToggleArchive: (threadId: string) => void;
-  onExportThread: (threadId: string) => void;
-  onPrintThread: (threadId: string) => void;
+  onDownloadThread: (threadId: string) => void;
   onExport: () => void;
   onLogout: () => void;
   canExport: boolean;
@@ -77,8 +71,7 @@ export function Sidebar({
   onDeleteThread,
   onRenameThread,
   onToggleArchive,
-  onExportThread,
-  onPrintThread,
+  onDownloadThread,
   onExport,
   onLogout,
   canExport,
@@ -88,12 +81,6 @@ export function Sidebar({
 }: SidebarProps) {
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
-  const [comingSoonLabel, setComingSoonLabel] = useState<string | null>(null);
-
-  const showComingSoon = (label: string) => {
-    setComingSoonLabel(label);
-    setTimeout(() => setComingSoonLabel((current) => (current === label ? null : current)), 2000);
-  };
 
   const query = searchQuery.trim().toLowerCase();
   const matches = (t: ThreadSummary) =>
@@ -117,6 +104,12 @@ export function Sidebar({
         </IconButton>
         <IconButton onClick={() => onNavigate("library")} aria-label="Library">
           <Library size={18} />
+        </IconButton>
+        <IconButton onClick={() => onNavigate("scheduled")} aria-label="Scheduled">
+          <Clock size={18} />
+        </IconButton>
+        <IconButton onClick={() => onNavigate("codex")} aria-label="Codex">
+          <Terminal size={18} />
         </IconButton>
       </aside>
     );
@@ -164,19 +157,13 @@ export function Sidebar({
       )}
 
       <nav className="mt-1 flex flex-col gap-0.5 px-2">
-        {NAV_ITEMS.map(({ label, icon: Icon }) => (
+        {NAV_ITEMS.map(({ label, icon: Icon, view }) => (
           <button
             key={label}
-            onClick={() => {
-              if (label === "Images" || label === "Library") {
-                onNavigate(label.toLowerCase() as AppView);
-              } else {
-                showComingSoon(label);
-              }
-            }}
-            aria-current={label.toLowerCase() === activeView ? "page" : undefined}
+            onClick={() => onNavigate(view)}
+            aria-current={view === activeView ? "page" : undefined}
             className={`flex items-center gap-2 rounded-lg px-2 py-2 text-sm hover:bg-surface-hover hover:text-white ${
-              label.toLowerCase() === activeView
+              view === activeView
                 ? "bg-surface-hover text-white"
                 : "text-white/80"
             }`}
@@ -184,28 +171,10 @@ export function Sidebar({
             <Icon size={16} />
             <span className="flex items-center gap-2">
               {label}
-              {label !== "Images" && label !== "Library" && (
-                <span className="rounded bg-white/10 px-1.5 py-0.5 text-[10px] uppercase tracking-[0.08em] text-white/50">
-                  Coming Soon
-                </span>
-              )}
             </span>
           </button>
         ))}
-        <button
-          onClick={() => showComingSoon("More")}
-          className="flex items-center gap-2 rounded-lg px-2 py-2 text-sm text-white/60 hover:bg-surface-hover hover:text-white"
-        >
-          <MoreHorizontal size={16} />
-          More
-        </button>
       </nav>
-
-      {comingSoonLabel && (
-        <p className="px-4 py-1 text-xs text-white/40">
-          {comingSoonLabel} — coming soon
-        </p>
-      )}
 
       <div className="mt-4 flex-1 overflow-y-auto px-2 thin-scrollbar">
         {loading && <p className="px-2 py-2 text-xs text-white/40">Loading chats…</p>}
@@ -228,8 +197,7 @@ export function Sidebar({
                 onDeleteThread={onDeleteThread}
                 onRenameThread={onRenameThread}
                 onToggleArchive={onToggleArchive}
-                onExportThread={onExportThread}
-                onPrintThread={onPrintThread}
+                onDownloadThread={onDownloadThread}
               />
             )}
             <ThreadGroup
@@ -241,8 +209,7 @@ export function Sidebar({
               onDeleteThread={onDeleteThread}
               onRenameThread={onRenameThread}
               onToggleArchive={onToggleArchive}
-              onExportThread={onExportThread}
-              onPrintThread={onPrintThread}
+              onDownloadThread={onDownloadThread}
             />
             {archived.length > 0 && (
               <ArchivedGroup
@@ -253,8 +220,7 @@ export function Sidebar({
                 onDeleteThread={onDeleteThread}
                 onRenameThread={onRenameThread}
                 onToggleArchive={onToggleArchive}
-                onExportThread={onExportThread}
-                onPrintThread={onPrintThread}
+                onDownloadThread={onDownloadThread}
               />
             )}
           </>
@@ -364,8 +330,7 @@ function ArchivedGroup({
   onDeleteThread,
   onRenameThread,
   onToggleArchive,
-  onExportThread,
-  onPrintThread,
+  onDownloadThread,
 }: {
   threads: ThreadSummary[];
   activeThreadId: string | null;
@@ -374,8 +339,7 @@ function ArchivedGroup({
   onDeleteThread: (threadId: string) => void;
   onRenameThread: (threadId: string, title: string) => void;
   onToggleArchive: (threadId: string) => void;
-  onExportThread: (threadId: string) => void;
-  onPrintThread: (threadId: string) => void;
+  onDownloadThread: (threadId: string) => void;
 }) {
   const [open, setOpen] = useState(false);
 
@@ -399,8 +363,7 @@ function ArchivedGroup({
           onDeleteThread={onDeleteThread}
           onRenameThread={onRenameThread}
           onToggleArchive={onToggleArchive}
-          onExportThread={onExportThread}
-          onPrintThread={onPrintThread}
+          onDownloadThread={onDownloadThread}
         />
       )}
     </div>
@@ -416,8 +379,7 @@ function ThreadGroup({
   onDeleteThread,
   onRenameThread,
   onToggleArchive,
-  onExportThread,
-  onPrintThread,
+  onDownloadThread,
 }: {
   label: string;
   threads: ThreadSummary[];
@@ -427,8 +389,7 @@ function ThreadGroup({
   onDeleteThread: (threadId: string) => void;
   onRenameThread: (threadId: string, title: string) => void;
   onToggleArchive: (threadId: string) => void;
-  onExportThread: (threadId: string) => void;
-  onPrintThread: (threadId: string) => void;
+  onDownloadThread: (threadId: string) => void;
 }) {
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -513,8 +474,7 @@ function ThreadGroup({
                 onDelete={handleDelete}
                 onRename={() => startEditing(thread)}
                 onToggleArchive={() => onToggleArchive(thread.threadId)}
-                onExport={() => onExportThread(thread.threadId)}
-                onPrint={() => onPrintThread(thread.threadId)}
+                onDownload={() => onDownloadThread(thread.threadId)}
               />
             )}
           </div>
@@ -531,8 +491,7 @@ function ThreadMenu({
   onDelete,
   onRename,
   onToggleArchive,
-  onExport,
-  onPrint,
+  onDownload,
 }: {
   thread: ThreadSummary;
   onClose: () => void;
@@ -540,8 +499,7 @@ function ThreadMenu({
   onDelete: (thread: ThreadSummary) => void;
   onRename: () => void;
   onToggleArchive: () => void;
-  onExport: () => void;
-  onPrint: () => void;
+  onDownload: () => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
 
@@ -592,24 +550,13 @@ function ThreadMenu({
 
       <button
         onClick={() => {
-          onExport();
+          onDownload();
           onClose();
         }}
         className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-white/90 hover:bg-surface-hover"
       >
         <Download size={14} />
         Download .md
-      </button>
-
-      <button
-        onClick={() => {
-          onPrint();
-          onClose();
-        }}
-        className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-white/90 hover:bg-surface-hover"
-      >
-        <Printer size={14} />
-        Print / PDF
       </button>
 
       <div className="my-1 border-t border-surface-border" />

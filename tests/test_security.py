@@ -38,7 +38,7 @@ def test_validate_file_security_invalid_extension(tmp_path):
     bad_file = tmp_path / "malicious.exe"
     bad_file.write_text("binary content")
 
-    with pytest.raises(ValueError, match="Unsupported or unallowed file format"):
+    with pytest.raises(ValueError, match="Unsupported file format"):
         validate_file_security(str(bad_file))
 
 

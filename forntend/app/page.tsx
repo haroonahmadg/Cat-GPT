@@ -6,7 +6,7 @@ import clsx from "clsx";
 import { Volume2, Square, Loader2, Copy, Check, Pencil, RotateCcw, Eye, EyeOff, ImagePlus, MoreHorizontal, Pin, PinOff, Archive, ArchiveRestore, Trash2, Download, Printer, PencilLine, FolderClosed } from "lucide-react";
 import { Sidebar, type AppView } from "@/components/Sidebar";
 import { CatLogo } from "@/components/CatLogo";
-import { CatMood } from "@/components/CatMood";
+import { CodexView, ScheduledView } from "@/components/FeatureViews";
 import { HomeHero } from "@/components/HomeHero";
 import { QuickActions } from "@/components/QuickActions";
 import { ChatInput } from "@/components/ChatInput";
@@ -150,7 +150,6 @@ export default function HomePage() {
     messages,
     messagesLoading,
     isStreaming,
-    catMood,
     resetChatState,
     activityLabel,
     sendError,
@@ -177,8 +176,6 @@ export default function HomePage() {
     exportThreadById,
     editLastMessage,
     retryLastMessage,
-    researchMode,
-    setResearchMode,
   } = useChat();
 
   const openPrintView = (threadId: string) => {
@@ -367,7 +364,7 @@ export default function HomePage() {
 
   return (
     <div className="flex h-screen w-full overflow-hidden bg-surface text-white">
-      <Sidebar
+      {activeView !== "codex" && <Sidebar
         collapsed={sidebarCollapsed}
         onToggleCollapsed={() => setSidebarCollapsed((prev) => !prev)}
         activeThreadId={activeThreadId}
@@ -383,21 +380,19 @@ export default function HomePage() {
         onDeleteThread={removeThread}
         onRenameThread={renameThread}
         onToggleArchive={toggleArchive}
-        onExportThread={(threadId) => void exportThreadById(threadId)}
-        onPrintThread={openPrintView}
+        onDownloadThread={(threadId) => void exportThreadById(threadId)}
         onExport={exportCurrentThread}
         onLogout={logout}
         canExport={hasConversation}
         userDisplayName={user?.name?.trim() || user?.email || "Account"}
         activeView={activeView}
         onNavigate={setActiveView}
-      />
+      />}
 
       <div className="flex min-w-0 flex-1 flex-col">
         {activeView === "chat" && activeThread && (
           <div className="flex h-12 shrink-0 items-center justify-between border-b border-surface-border px-4">
             <h2 className="truncate text-sm font-medium text-white/80">{activeThread.title}</h2>
-            <CatMood mood={catMood} />
             <div className="relative">
               <button
                 type="button"
@@ -451,7 +446,14 @@ export default function HomePage() {
             </div>
           </div>
         )}
-        {activeView === "images" ? (
+        {activeView === "codex" ? (
+          <CodexView
+            userKey={(user?.email ?? user?.name ?? "account").toLowerCase()}
+            onExit={() => setActiveView("chat")}
+          />
+        ) : activeView === "scheduled" ? (
+          <ScheduledView userKey={(user?.email ?? user?.name ?? "account").toLowerCase()} />
+        ) : activeView === "images" ? (
           <main className="flex flex-1 flex-col items-center overflow-y-auto px-4 py-10">
             <section className="w-full max-w-2xl">
               <div className="mb-6 flex items-center gap-3">
@@ -550,9 +552,6 @@ export default function HomePage() {
         ) : !hasConversation ? (
           <main className="flex flex-1 flex-col items-center justify-center px-4">
             <div className="w-full max-w-2xl">
-              <div className="mb-3 flex justify-center">
-                <CatMood mood={catMood} />
-              </div>
               <HomeHero />
 
               <ChatInput
@@ -659,30 +658,6 @@ export default function HomePage() {
                           )}
                         </div>
                         </div>
-
-                        {!isUser && !!message.citations?.length && (
-                          <details className="mt-1 max-w-[80%] self-start text-xs text-white/65">
-                            <summary className="cursor-pointer rounded-full border border-surface-border px-2.5 py-1 hover:bg-surface-hover">
-                              Sources ({message.citations.length})
-                            </summary>
-                            <div className="mt-1 grid gap-1 rounded-xl border border-surface-border bg-surface-raised p-2">
-                              {message.citations.map((citation, index) => (
-                                <details
-                                  key={`${citation.file}-${citation.page ?? "?"}-${index}`}
-                                  className="rounded-lg px-2 py-1 hover:bg-surface-hover"
-                                >
-                                  <summary className="cursor-pointer">
-                                    {citation.file}
-                                    {citation.page !== null ? ` · p.${citation.page}` : ""}
-                                  </summary>
-                                  <p className="mt-1 whitespace-pre-wrap text-white/80">
-                                    {citation.preview || "Citation reference from this response."}
-                                  </p>
-                                </details>
-                              ))}
-                            </div>
-                          </details>
-                        )}
 
                         {!message.streaming && isUser && (
                           <div className="mt-1 flex max-w-[80%] self-end gap-1">

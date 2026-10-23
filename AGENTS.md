@@ -1,6 +1,7 @@
-﻿# AGENTS.md — Cat GPT project brief
+# AGENTS.md — Cat GPT project guidance
 
 > Code wins over comments. This repo is the live implementation for Cat GPT.
+> See `README.md` for current architecture, setup, and deployment guidance.
 
 ## Project purpose
 
@@ -12,7 +13,8 @@ Cat GPT is a portfolio chat assistant built on FastAPI, LangGraph, FAISS-backed 
 - Agent: `agent/graph.py` is the LangGraph orchestrator. It keeps `research_mode` in `AgentState` and routes to research plan/synthesis when enabled.
 - Tools: `agent/tools.py` is the tool inventory; the app emits custom activity/citation events with `emit_tool_event()`.
 - RAG: `rag/ingest.py` and `rag/search.py` maintain user-scoped FAISS metadata and retrieval previews.
-- Frontend: `forntend/` is the Next.js App Router shell. It renders streaming chat, citations, markdown, export, and the cat mood indicator.
+- Frontend: `forntend/` is the primary Next.js App Router UI. It renders streaming chat, citations, markdown, export, and the separate Codex workspace.
+- Alternate UI: root `app.py` is a Streamlit interface retained for compatibility; it shares some backend and local data code.
 
 ## Runtime contract
 
@@ -30,11 +32,10 @@ Clients must ignore unknown event types. Existing event shapes stay stable; new 
 
 Implemented and in the codebase:
 - F1 markdown + syntax highlighting
-- F2 cat mood indicator
 - F3 export / print-to-PDF
 - F4 citations + sources panel
 - F5 voice input / Whisper transcription
-- F6 research mode subgraph with `research_mode` state and plan/synthesis routing
+- Research-mode graph routing with `research_mode` state and plan/synthesis nodes; the current Next.js UI does not expose the toggle.
 
 ## Repo rules
 
@@ -43,13 +44,3 @@ Implemented and in the codebase:
 - Keep LangGraph orchestration in the agent layer; do not hand-roll routing in the API.
 - Preserve backward compatibility for old checkpoints when adding state fields.
 - Focus on surgical fixes and existing project patterns.
-
-## F6 audit
-
-| Check | Status | Evidence |
-|---|---|---|
-| `AgentState.research_mode` | Present | `agent/graph.py` defines `research_mode: bool` and passes it through graph input. |
-| Research routing | Present | `build_graph()` routes `START` and tool completion to research nodes when enabled. |
-| Research plan event | Present | `research_plan_node()` emits a `plan` custom event; stream remains additive. |
-| Synthesis | Present | `research_synthesize_node()` creates the final answer grounded in research results. |
-| Backward compatibility | Present | `state.get("research_mode", False)` keeps older checkpoint values valid. |

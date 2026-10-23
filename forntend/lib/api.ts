@@ -322,7 +322,6 @@ export function streamMessage(
   images: { image_bytes: string; image_type: string; filename: string }[],
   onEvent: (event: StreamEvent) => void,
   onError: (error: Error) => void,
-  researchMode: boolean = false,
 ): { abort: () => void } {
   const controller = new AbortController();
 
@@ -337,7 +336,6 @@ export function streamMessage(
             content,
             files,
             images,
-            research_mode: researchMode,
           }),
           signal: controller.signal,
         },
@@ -378,6 +376,22 @@ export function streamMessage(
   })();
 
   return { abort: () => controller.abort() };
+}
+
+export function streamCodexMessage(
+  threadId: string,
+  content: string,
+  onEvent: (event: StreamEvent) => void,
+  onError: (error: Error) => void,
+): { abort: () => void } {
+  return streamMessage(
+    threadId,
+    content,
+    [],
+    [],
+    onEvent,
+    onError,
+  );
 }
 
 /**
