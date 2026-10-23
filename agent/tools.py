@@ -106,6 +106,7 @@ HF_IMAGE_STYLE_PREFIX = (
     "photorealistic photograph, natural lighting, fine detail, "
     "50mm lens — "
 )
+POLLINATIONS_IMAGE_URL = "https://image.pollinations.ai/prompt/"
 IMAGE_TIMEOUT_SECONDS = 20
 
 GENERATED_IMAGE_DIR = Path(
@@ -1083,21 +1084,10 @@ def generate_image(
         os.getenv("HF_API_KEY", "").strip()
         or os.getenv("HF_API_TOKEN", "").strip()
     )
-    if not api_key:
-        emit_tool_event(
-            "Image generation failed",
-            event="tool_error",
-            tool="generate_image",
-        )
-        return (
-            "Image generation error: image service is busy or not configured "
-            "right now, please try again"
-        )
-
     try:
         enhanced_prompt = f"{HF_IMAGE_STYLE_PREFIX}{prompt.strip()}"
         last_error = None
-        for model_name in HF_IMAGE_MODELS:
+        for model_name in (HF_IMAGE_MODELS if api_key else ()):
             try:
                 response = httpx.post(
                     HF_IMAGE_URL,
@@ -1172,11 +1162,51 @@ def generate_image(
                 )
                 continue
 
-        logger.error(
-            "Hugging Face image generation failed with both configured models: %s",
-            type(last_error).__name__ if last_error else "unknown error",
+        if not api_key:
+            logger.info("HF_API_KEY is not configured; trying Pollinations fallback")
+        else:
+            logger.warning(
+                "Hugging Face image generation failed with both configured models (%s); "
+                "trying Pollinations fallback",
+                type(last_error).__name__ if last_error else "unknown error",
+            )
+        emit_tool_event(
+            "Trying alternate image provider",
+            event="tool_started",
+            tool="generate_image",
         )
-        error_message = "image service is busy or not configured right now, please try again"
+        fallback_response = httpx.get(
+            f"{POLLINATIONS_IMAGE_URL}{quote(prompt, safe='')}",
+            params={"width": 1024, "height": 1024, "nologo": "true"},
+            timeout=IMAGE_TIMEOUT_SECONDS,
+        )
+        fallback_response.raise_for_status()
+        if not fallback_response.headers.get("content-type", "").lower().startswith("image/"):
+            raise ValueError("the alternate image provider returned a non-image response.")
+        fallback_bytes = fallback_response.content
+        if not fallback_bytes:
+            raise ValueError("the alternate image provider returned an empty image.")
+        user_id = active_user_id.get()
+        if not user_id:
+            raise RuntimeError("An authenticated user is required to save generated images.")
+        filename = f"{uuid.uuid4().hex[:16]}.png"
+        saved_path = get_generated_image_dir(user_id, create=True) / filename
+
+        from PIL import Image
+        from io import BytesIO
+
+        with Image.open(BytesIO(fallback_bytes)) as image:
+            image.convert("RGB").save(saved_path, format="PNG")
+
+        if saved_path.stat().st_size == 0:
+            raise ValueError("received an empty image.")
+
+        emit_tool_event(
+            "Image generation completed",
+            event="tool_completed",
+            tool="generate_image",
+        )
+        return f"{GENERATED_IMAGE_MARKER}{filename}"
 
     except (requests.exceptions.Timeout, httpx.TimeoutException):
         error_message = "image service timed out, please try again"

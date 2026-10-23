@@ -244,16 +244,70 @@ def test_generate_image_returns_plain_message_when_both_models_fail(image_api, m
         response = httpx.Response(404, request=request)
         raise httpx.HTTPStatusError("Not found", request=request, response=response)
 
+    def fake_get(url, **kwargs):
+        request = httpx.Request("GET", url)
+        response = httpx.Response(404, request=request)
+        raise httpx.HTTPStatusError("Not found", request=request, response=response)
+
     monkeypatch.setattr(agent_tools.httpx, "post", fake_post)
+    monkeypatch.setattr(agent_tools.httpx, "get", fake_get)
     monkeypatch.setattr(agent_tools, "emit_tool_event", lambda *args, **kwargs: None)
 
     result = agent_tools.generate_image.func("A cat")
 
     assert requested_models == list(agent_tools.HF_IMAGE_MODELS)
-    assert result == (
-        "Image generation error: image service is busy or not configured right now, "
-        "please try again"
+    assert result == "Image generation error: image service returned status 404."
+
+
+def test_generate_image_falls_back_to_pollinations_after_hugging_face_404(
+    image_api, monkeypatch
+):
+    _, _, agent_tools = image_api
+    import httpx
+    from io import BytesIO
+    from PIL import Image
+
+    monkeypatch.setenv("HF_API_KEY", "test-key")
+    user_token = agent_tools.active_user_id.set("pollinations-fallback-user")
+    image_bytes = BytesIO()
+    Image.new("RGB", (2, 2), color="green").save(image_bytes, format="JPEG")
+    requested_models = []
+    fallback_calls = []
+
+    def fake_post(url, **kwargs):
+        requested_models.append(kwargs["json"]["model"])
+        request = httpx.Request("POST", url)
+        response = httpx.Response(404, request=request)
+        raise httpx.HTTPStatusError("Not found", request=request, response=response)
+
+    class FakeImageResponse:
+        headers = {"content-type": "image/jpeg"}
+        content = image_bytes.getvalue()
+
+        def raise_for_status(self):
+            return None
+
+    def fake_get(url, **kwargs):
+        fallback_calls.append((url, kwargs))
+        return FakeImageResponse()
+
+    monkeypatch.setattr(agent_tools.httpx, "post", fake_post)
+    monkeypatch.setattr(agent_tools.httpx, "get", fake_get)
+    monkeypatch.setattr(agent_tools, "emit_tool_event", lambda *args, **kwargs: None)
+    try:
+        result = agent_tools.generate_image.func("A green cat")
+    finally:
+        agent_tools.active_user_id.reset(user_token)
+
+    assert result.startswith(agent_tools.GENERATED_IMAGE_MARKER)
+    assert requested_models == list(agent_tools.HF_IMAGE_MODELS)
+    assert fallback_calls[0][0].startswith(agent_tools.POLLINATIONS_IMAGE_URL)
+    saved_path = (
+        agent_tools.get_generated_image_dir("pollinations-fallback-user")
+        / result.removeprefix(agent_tools.GENERATED_IMAGE_MARKER)
     )
+    with Image.open(saved_path) as saved:
+        assert saved.size == (2, 2)
 
 
 def test_generate_image_without_hugging_face_key_is_plain_and_skips_request(
@@ -267,14 +321,20 @@ def test_generate_image_without_hugging_face_key_is_plain_and_skips_request(
         "post",
         lambda *args, **kwargs: pytest.fail("HTTP request should not be made without a key"),
     )
+
+    import httpx
+
+    def failed_pollinations(url, **kwargs):
+        request = httpx.Request("GET", url)
+        response = httpx.Response(503, request=request)
+        raise httpx.HTTPStatusError("Unavailable", request=request, response=response)
+
+    monkeypatch.setattr(agent_tools.httpx, "get", failed_pollinations)
     monkeypatch.setattr(agent_tools, "emit_tool_event", lambda *args, **kwargs: None)
 
     result = agent_tools.generate_image.func("A cat")
 
-    assert result == (
-        "Image generation error: image service is busy or not configured right now, "
-        "please try again"
-    )
+    assert result == "Image generation error: image service returned status 503."
 
 
 @pytest.mark.parametrize(
