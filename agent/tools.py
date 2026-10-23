@@ -97,12 +97,16 @@ import hashlib
 
 logger = logging.getLogger(__name__)
 
-# Pollinations' hosted Flux endpoint does not require an inference-credit
-# balance or API token. Availability and free access are controlled by the
-# provider, so failures are reported rather than silently billed elsewhere.
-POLLINATIONS_IMAGE_URL = "https://image.pollinations.ai/prompt/"
-POLLINATIONS_IMAGE_MODEL = os.getenv("POLLINATIONS_IMAGE_MODEL", "flux").strip() or "flux"
-IMAGE_TIMEOUT_SECONDS = 120
+HF_IMAGE_URL = "https://router.huggingface.co/v1/images/generations"
+HF_IMAGE_MODELS = (
+    "black-forest-labs/FLUX.1-dev",
+    "black-forest-labs/FLUX.1-schnell",
+)
+HF_IMAGE_STYLE_PREFIX = (
+    "photorealistic photograph, natural lighting, fine detail, "
+    "50mm lens — "
+)
+IMAGE_TIMEOUT_SECONDS = 20
 
 GENERATED_IMAGE_DIR = Path(
     os.getenv("DATA_DIR", str(Path(__file__).resolve().parent.parent / "data"))
@@ -1022,27 +1026,17 @@ def rag_search(
 # =========================================================
 
 def _describe_image_error(exc: Exception) -> str:
-    """
-    Turn an image-provider failure into a specific, user-facing reason.
-
-    The model sees this text as the tool result, so it must name the
-    real cause instead of something generic like "service unreachable".
-    """
+    """Turn provider errors into plain, specific messages for the model."""
 
     status = getattr(getattr(exc, "response", None), "status_code", None)
-
     if status == 429:
-        return "the free image service is rate-limited. Please wait and try again."
-
+        return "image service is busy or not configured right now, please try again"
     if status:
-        return f"the image service returned status {status}."
-
-    if isinstance(exc, requests.exceptions.ConnectionError):
-        return (
-            "could not connect to the free image service. Check your "
-            "internet connection."
-        )
-
+        return f"image service returned status {status}."
+    if isinstance(exc, (requests.exceptions.Timeout, httpx.TimeoutException)):
+        return "image service timed out, please try again"
+    if isinstance(exc, (requests.exceptions.ConnectionError, httpx.RequestError)):
+        return "image service could not be reached, please try again"
     return f"{type(exc).__name__}: {exc}"
 
 
@@ -1085,58 +1079,111 @@ def generate_image(
     )
 
     saved_path = None
-
-    try:
-        response = requests.get(
-            f"{POLLINATIONS_IMAGE_URL}{requests.utils.quote(prompt, safe='')}",
-            params={
-                "width": 1024,
-                "height": 1024,
-                "nologo": "true",
-                "model": POLLINATIONS_IMAGE_MODEL,
-            },
-            timeout=IMAGE_TIMEOUT_SECONDS,
-        )
-        response.raise_for_status()
-        if not response.headers.get("content-type", "").lower().startswith("image/"):
-            raise ValueError("the service returned data that was not an image.")
-        if not response.content:
-            raise ValueError("the service returned an empty image.")
-        user_id = active_user_id.get()
-        if not user_id:
-            raise RuntimeError("An authenticated user is required to save generated images.")
-        filename = f"{uuid.uuid4().hex[:16]}.png"
-        saved_path = get_generated_image_dir(user_id, create=True) / filename
-
-        from PIL import Image
-        from io import BytesIO
-
-        with Image.open(BytesIO(response.content)) as image:
-            image.convert("RGB").save(saved_path, format="PNG")
-
-        if saved_path.stat().st_size == 0:
-            raise ValueError("received an empty image.")
-
+    api_key = (
+        os.getenv("HF_API_KEY", "").strip()
+        or os.getenv("HF_API_TOKEN", "").strip()
+    )
+    if not api_key:
         emit_tool_event(
-            "Image generation completed",
-            event="tool_completed",
+            "Image generation failed",
+            event="tool_error",
             tool="generate_image",
         )
+        return (
+            "Image generation error: image service is busy or not configured "
+            "right now, please try again"
+        )
 
-        # The marker + filename is parsed by api/streaming.py to produce
-        # a dedicated "image" SSE event. filename only (not the full
-        # path) is sent to the client — api/main.py resolves it only
-        # within the authenticated user's image directory.
-        return f"{GENERATED_IMAGE_MARKER}{filename}"
+    try:
+        enhanced_prompt = f"{HF_IMAGE_STYLE_PREFIX}{prompt.strip()}"
+        last_error = None
+        for model_name in HF_IMAGE_MODELS:
+            try:
+                response = httpx.post(
+                    HF_IMAGE_URL,
+                    headers={"Authorization": f"Bearer {api_key}"},
+                    json={"model": model_name, "prompt": enhanced_prompt},
+                    timeout=IMAGE_TIMEOUT_SECONDS,
+                )
+                response.raise_for_status()
+                if response.headers.get("content-type", "").lower().startswith("image/"):
+                    image_bytes = response.content
+                else:
+                    payload = response.json()
+                    data = payload.get("data")
+                    if not isinstance(data, list) or not data or not isinstance(data[0], dict):
+                        raise ValueError("the service response did not include image data.")
+                    image_result = data[0]
+                    encoded_image = image_result.get("b64_json")
+                    image_url = image_result.get("url")
+                    if isinstance(encoded_image, str) and encoded_image:
+                        import base64
 
-    except requests.exceptions.Timeout:
-        error_message = "the request timed out. Please try again in a moment."
+                        image_bytes = base64.b64decode(encoded_image, validate=True)
+                    elif isinstance(image_url, str) and image_url:
+                        emit_tool_event(
+                            "Retrieving generated image",
+                            event="tool_started",
+                            tool="generate_image",
+                        )
+                        image_response = httpx.get(
+                            image_url,
+                            timeout=IMAGE_TIMEOUT_SECONDS,
+                        )
+                        image_response.raise_for_status()
+                        image_bytes = image_response.content
+                    else:
+                        raise ValueError("the service response did not include image data.")
+                if not image_bytes:
+                    raise ValueError("the service returned an empty image.")
+                user_id = active_user_id.get()
+                if not user_id:
+                    raise RuntimeError("An authenticated user is required to save generated images.")
+                filename = f"{uuid.uuid4().hex[:16]}.png"
+                saved_path = get_generated_image_dir(user_id, create=True) / filename
 
+                from PIL import Image
+                from io import BytesIO
+
+                with Image.open(BytesIO(image_bytes)) as image:
+                    image.convert("RGB").save(saved_path, format="PNG")
+
+                if saved_path.stat().st_size == 0:
+                    raise ValueError("received an empty image.")
+
+                emit_tool_event(
+                    "Image generation completed",
+                    event="tool_completed",
+                    tool="generate_image",
+                )
+                return f"{GENERATED_IMAGE_MARKER}{filename}"
+            except Exception as exc:  # noqa: BLE001
+                last_error = exc
+                logger.warning(
+                    "Hugging Face image generation failed with %s for %s",
+                    type(exc).__name__,
+                    model_name,
+                )
+                if model_name == HF_IMAGE_MODELS[-1]:
+                    break
+                logger.info(
+                    "Retrying Hugging Face image generation with fallback model %s",
+                    HF_IMAGE_MODELS[1],
+                )
+                continue
+
+        logger.error(
+            "Hugging Face image generation failed with both configured models: %s",
+            type(last_error).__name__ if last_error else "unknown error",
+        )
+        error_message = "image service is busy or not configured right now, please try again"
+
+    except (requests.exceptions.Timeout, httpx.TimeoutException):
+        error_message = "image service timed out, please try again"
     except Exception as exc:
-        logger.exception("Image generation failed")
+        logger.warning("Image generation failed with %s", type(exc).__name__)
         error_message = _describe_image_error(exc)
 
-    # Shared failure path: remove any half-written file, report once.
     if saved_path is not None:
         try:
             saved_path.unlink(missing_ok=True)

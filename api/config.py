@@ -75,7 +75,7 @@ FRONTEND_ORIGINS = [
 # IMAGE GENERATION (Hugging Face Inference API)
 # ============================================================
 
-HF_API_TOKEN = os.getenv("HF_API_TOKEN", "").strip()
+HF_API_KEY = os.getenv("HF_API_KEY", "").strip() or os.getenv("HF_API_TOKEN", "").strip()
 HF_IMAGE_MODEL = os.getenv(
     "HF_IMAGE_MODEL", "stabilityai/stable-diffusion-xl-base-1.0"
 ).strip()

@@ -122,26 +122,45 @@ def test_image_generation_uses_authenticated_account(image_api, monkeypatch):
 
 def test_generate_image_uses_free_provider_and_saves_valid_image(image_api, monkeypatch):
     _, _, agent_tools = image_api
+    import base64
     from io import BytesIO
     from PIL import Image
 
+    monkeypatch.setenv("HF_API_KEY", "test-key")
     user_token = agent_tools.active_user_id.set("free-provider-user")
     image_bytes = BytesIO()
     Image.new("RGB", (2, 2), color="red").save(image_bytes, format="PNG")
     calls = []
 
-    class FakeResponse:
-        headers = {"content-type": "image/png"}
-        content = image_bytes.getvalue()
+    class FakePostResponse:
+        headers = {"content-type": "application/json"}
+
+        def __init__(self, payload, status_code=200):
+            self._payload = payload
+            self.status_code = status_code
 
         def raise_for_status(self):
-            return None
+            if self.status_code >= 400:
+                import httpx
 
-    def fake_get(url, **kwargs):
-        calls.append((url, kwargs))
-        return FakeResponse()
+                request = httpx.Request("POST", agent_tools.HF_IMAGE_URL)
+                response = httpx.Response(self.status_code, request=request)
+                raise httpx.HTTPStatusError(
+                    f"HTTP {self.status_code}",
+                    request=request,
+                    response=response,
+                )
 
-    monkeypatch.setattr(agent_tools.requests, "get", fake_get)
+        def json(self):
+            return self._payload
+
+    def fake_post(url, **kwargs):
+        calls.append(("post", url, kwargs))
+        return FakePostResponse({
+            "data": [{"b64_json": base64.b64encode(image_bytes.getvalue()).decode()}]
+        })
+
+    monkeypatch.setattr(agent_tools.httpx, "post", fake_post)
     monkeypatch.setattr(agent_tools, "emit_tool_event", lambda *args, **kwargs: None)
     try:
         result = agent_tools.generate_image.func("A cat in a garden")
@@ -149,14 +168,113 @@ def test_generate_image_uses_free_provider_and_saves_valid_image(image_api, monk
         agent_tools.active_user_id.reset(user_token)
 
     assert result.startswith(agent_tools.GENERATED_IMAGE_MARKER)
-    assert calls[0][0].startswith(agent_tools.POLLINATIONS_IMAGE_URL)
-    assert calls[0][1]["params"]["model"] == agent_tools.POLLINATIONS_IMAGE_MODEL
+    assert calls[0][1] == agent_tools.HF_IMAGE_URL
+    assert calls[0][2]["json"]["model"] == agent_tools.HF_IMAGE_MODELS[0]
+    assert calls[0][2]["json"]["prompt"].startswith(agent_tools.HF_IMAGE_STYLE_PREFIX)
     image_path = (
         agent_tools.get_generated_image_dir("free-provider-user")
         / f"{result.removeprefix(agent_tools.GENERATED_IMAGE_MARKER)}"
     )
     with Image.open(image_path) as saved:
         assert saved.size == (2, 2)
+
+
+def test_generate_image_retries_schnell_after_dev_failure(image_api, monkeypatch):
+    _, _, agent_tools = image_api
+    import base64
+    from io import BytesIO
+    from PIL import Image
+    import httpx
+
+    monkeypatch.setenv("HF_API_KEY", "test-key")
+    user_token = agent_tools.active_user_id.set("fallback-image-user")
+    image_bytes = BytesIO()
+    Image.new("RGB", (2, 2), color="blue").save(image_bytes, format="PNG")
+    requested_models = []
+
+    class FakeResponse:
+        headers = {"content-type": "application/json"}
+
+        def __init__(self, status_code):
+            self.status_code = status_code
+
+        def raise_for_status(self):
+            if self.status_code >= 400:
+                request = httpx.Request("POST", agent_tools.HF_IMAGE_URL)
+                response = httpx.Response(self.status_code, request=request)
+                raise httpx.HTTPStatusError(
+                    f"HTTP {self.status_code}",
+                    request=request,
+                    response=response,
+                )
+
+        def json(self):
+            return {
+                "data": [{
+                    "b64_json": base64.b64encode(image_bytes.getvalue()).decode()
+                }]
+            }
+
+    def fake_post(url, **kwargs):
+        model = kwargs["json"]["model"]
+        requested_models.append(model)
+        return FakeResponse(429 if model == agent_tools.HF_IMAGE_MODELS[0] else 200)
+
+    monkeypatch.setattr(agent_tools.httpx, "post", fake_post)
+    monkeypatch.setattr(agent_tools, "emit_tool_event", lambda *args, **kwargs: None)
+    try:
+        result = agent_tools.generate_image.func("A blue cat")
+    finally:
+        agent_tools.active_user_id.reset(user_token)
+
+    assert result.startswith(agent_tools.GENERATED_IMAGE_MARKER)
+    assert requested_models == list(agent_tools.HF_IMAGE_MODELS)
+
+
+def test_generate_image_returns_plain_message_when_both_models_fail(image_api, monkeypatch):
+    _, _, agent_tools = image_api
+    import httpx
+
+    monkeypatch.setenv("HF_API_KEY", "test-key")
+    requested_models = []
+
+    def fake_post(url, **kwargs):
+        requested_models.append(kwargs["json"]["model"])
+        request = httpx.Request("POST", url)
+        response = httpx.Response(404, request=request)
+        raise httpx.HTTPStatusError("Not found", request=request, response=response)
+
+    monkeypatch.setattr(agent_tools.httpx, "post", fake_post)
+    monkeypatch.setattr(agent_tools, "emit_tool_event", lambda *args, **kwargs: None)
+
+    result = agent_tools.generate_image.func("A cat")
+
+    assert requested_models == list(agent_tools.HF_IMAGE_MODELS)
+    assert result == (
+        "Image generation error: image service is busy or not configured right now, "
+        "please try again"
+    )
+
+
+def test_generate_image_without_hugging_face_key_is_plain_and_skips_request(
+    image_api, monkeypatch
+):
+    _, _, agent_tools = image_api
+    monkeypatch.delenv("HF_API_KEY", raising=False)
+    monkeypatch.delenv("HF_API_TOKEN", raising=False)
+    monkeypatch.setattr(
+        agent_tools.httpx,
+        "post",
+        lambda *args, **kwargs: pytest.fail("HTTP request should not be made without a key"),
+    )
+    monkeypatch.setattr(agent_tools, "emit_tool_event", lambda *args, **kwargs: None)
+
+    result = agent_tools.generate_image.func("A cat")
+
+    assert result == (
+        "Image generation error: image service is busy or not configured right now, "
+        "please try again"
+    )
 
 
 @pytest.mark.parametrize(

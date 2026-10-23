@@ -1,7 +1,7 @@
 # Cat GPT — Free Deployment Guide ($0, no credit card)
 
 **Stack:** GitHub (code) → Render free tier (FastAPI backend) + Vercel Hobby (Next.js frontend)
-**External services:** Groq API (LLM), Pollinations (image gen), Hugging Face embeddings (local, free)
+**External services:** Groq API (LLM), Hugging Face Inference Providers (image generation; set `HF_API_KEY`), Hugging Face embeddings (local)
 
 ---
 
@@ -133,7 +133,7 @@ Render free sleeps after 15 min idle (~40 s cold start + model load). To keep Ca
 | **Cold start after sleep** | First request slow (~40 s + model load) | Keep-awake ping (§8) avoids it |
 | **Model download** | Embedding model downloads on first run after each deploy | Slow first ingest after a fresh deploy |
 | **Groq free rate limits** | Occasional 429s | Your model-fallback logic already handles this |
-| **Pollinations image gen** | External, no key needed | Availability varies; outside your control (matches your spec) |
+| **Hugging Face image generation** | External, requires `HF_API_KEY` | Uses FLUX.1-dev with a FLUX.1-schnell fallback |
 | **Streaming (SSE)** | Works fine on Render | Event format/thread association untouched |
 
 ## 10. Later upgrades (when it's more than a portfolio)
