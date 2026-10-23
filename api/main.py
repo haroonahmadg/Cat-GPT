@@ -1037,9 +1037,15 @@ def send_message_stream(
                 user_id=user_id,
                 messages=[agent_message],
                 thread_id=thread_id,
+                research_mode=request_body.research_mode,
             ):
 
                 if stream_mode == "custom":
+                    if isinstance(chunk, dict) and chunk.get("type") == "plan":
+                        steps = chunk.get("steps")
+                        if isinstance(steps, list):
+                            yield format_sse("plan", {"steps": steps})
+                        continue
                     if isinstance(chunk, dict) and chunk.get("event") == "citation":
                         citation = chunk.get("citation")
                         if isinstance(citation, dict):

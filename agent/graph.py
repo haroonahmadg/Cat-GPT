@@ -25,9 +25,10 @@ from langchain_core.messages import (
 from langchain_groq import ChatGroq
 
 from langgraph.checkpoint.sqlite import SqliteSaver
-from langgraph.graph import START, StateGraph
+from langgraph.graph import START, END, StateGraph
 from langgraph.graph.message import add_messages
 from langgraph.prebuilt import ToolNode, tools_condition
+from langgraph.config import get_stream_writer
 
 from database.db import get_memories
 
@@ -150,16 +151,12 @@ CHECKPOINT_DB_PATH.parent.mkdir(
 # AGENT STATE
 # ============================================================
 
-class AgentState(TypedDict):
+class AgentState(TypedDict, total=False):
     # The add_messages reducer is required, not optional decoration: it's
     # what makes each node's `{"messages": [...]}` return APPEND to the
-    # existing (checkpointed) conversation instead of REPLACING it. Without
-    # it, every graph.invoke() call — and every assistant->tools->assistant
-    # hop within a single call — wipes out prior messages, which silently
-    # drops uploaded-file context between turns and breaks tool calling
-    # outright (the model ends up rendering a request with no user-role
-    # message at all once a tool result overwrites the human turn).
+    # existing (checkpointed) conversation instead of REPLACING it.
     messages: Annotated[list[BaseMessage], add_messages]
+    research_mode: bool
 
 
 # ============================================================
@@ -696,6 +693,123 @@ def assistant_node(
 # BUILD LANGGRAPH
 # ============================================================
 
+def research_plan_node(state: AgentState) -> dict[str, Any]:
+    """Break user question into 2-4 sub-questions, emit plan event, and let model choose tools."""
+    user_query = ""
+    for msg in reversed(state.get("messages", [])):
+        if isinstance(msg, HumanMessage):
+            if isinstance(msg.content, str):
+                user_query = msg.content
+            elif isinstance(msg.content, list):
+                user_query = " ".join(
+                    b.get("text", "")
+                    for b in msg.content
+                    if isinstance(b, dict) and b.get("type") == "text"
+                )
+            break
+
+    planner_prompt = (
+        "You are a research planner. Analyze the user's question and break it down into 2 to 4 "
+        "distinct, focused sub-questions or search queries required to investigate it thoroughly.\n"
+        "Respond with ONLY a JSON list of strings, e.g.:\n"
+        '["First sub-question", "Second sub-question", "Third sub-question"]\n'
+        f"User question: {user_query or 'General inquiry'}"
+    )
+
+    try:
+        model_name = get_text_model_candidates()[0]
+        plan_response = get_llm(model_name).invoke([SystemMessage(content=planner_prompt)])
+        content = plan_response.content if isinstance(plan_response.content, str) else ""
+    except Exception:
+        content = ""
+
+    steps: list[str] = []
+    try:
+        import json
+        match = re.search(r"\[.*?\]", content, re.DOTALL)
+        if match:
+            parsed = json.loads(match.group(0))
+            if isinstance(parsed, list):
+                steps = [str(s).strip() for s in parsed if str(s).strip()]
+    except Exception:
+        pass
+
+    if not steps:
+        lines = [line.strip().lstrip("-*0123456789. ") for line in content.splitlines() if line.strip()]
+        steps = [l for l in lines if len(l) > 5][:4]
+
+    if len(steps) < 2:
+        clean_q = user_query[:60] if user_query else "General topic"
+        steps = [
+            f"Analyze background and context for {clean_q}",
+            f"Investigate current details and evidence for {clean_q}",
+        ]
+    elif len(steps) > 4:
+        steps = steps[:4]
+
+    try:
+        writer = get_stream_writer()
+        if writer:
+            writer({"type": "plan", "steps": steps})
+    except Exception:
+        pass
+
+    emit_tool_event(
+        f"Research plan: {len(steps)} sub-questions identified",
+        event="plan",
+        tool="research",
+        steps=steps,
+    )
+
+    steps_formatted = "\n".join(f"{i+1}. {step}" for i, step in enumerate(steps))
+    tool_selector_prompt = (
+        f"{build_system_prompt()}\n\n"
+        "You are in Research Mode. A research plan has been created with these sub-questions:\n"
+        f"{steps_formatted}\n\n"
+        "Now choose and call the appropriate tools (e.g. web_search, rag_search, etc.) "
+        "to gather information for these sub-questions."
+    )
+
+    messages = [
+        SystemMessage(content=tool_selector_prompt),
+        *state.get("messages", []),
+    ]
+
+    try:
+        model_name = get_text_model_candidates()[0]
+        tool_caller = get_llm(model_name).bind_tools(TOOLS)
+        call_response = tool_caller.invoke(messages)
+    except Exception as exc:
+        call_response = AIMessage(content=f"Proceeding with research synthesis ({exc}).")
+
+    return {"messages": [call_response]}
+
+
+def research_synthesize_node(state: AgentState) -> dict[str, Any]:
+    """Synthesize research findings into a grounded final answer."""
+    synthesize_prompt = (
+        f"{build_system_prompt()}\n\n"
+        "You are Cat GPT in Research Mode. You have conducted research using tools. "
+        "Now synthesize the gathered information into a thorough, comprehensive, and grounded final answer. "
+        "Organize with clear structure, cite findings clearly, and address the user's initial inquiry."
+    )
+
+    messages = [
+        SystemMessage(content=synthesize_prompt),
+        *state.get("messages", []),
+    ]
+
+    try:
+        model_name = get_text_model_candidates()[0]
+        response = get_llm(model_name).invoke(messages)
+    except Exception as exc:
+        response = AIMessage(
+            content=f"Sorry, I encountered an issue synthesizing the research: {exc}"
+        )
+
+    return {"messages": [response]}
+
+
 def build_graph(checkpointer=None):
     """
     Build and compile the LangGraph.
@@ -703,39 +817,53 @@ def build_graph(checkpointer=None):
 
     builder = StateGraph(AgentState)
 
-    # Assistant
-    builder.add_node(
-        "assistant",
-        assistant_node,
-    )
+    builder.add_node("assistant", assistant_node)
+    builder.add_node("tools", ToolNode(TOOLS))
+    builder.add_node("research_plan", research_plan_node)
+    builder.add_node("research_synthesize", research_synthesize_node)
 
-    # Tools
-    builder.add_node(
-        "tools",
-        ToolNode(TOOLS),
-    )
+    def route_start(state: AgentState) -> str:
+        if state.get("research_mode", False):
+            return "research_plan"
+        return "assistant"
 
-    # START -> Assistant
-    builder.add_edge(
+    builder.add_conditional_edges(
         START,
-        "assistant",
+        route_start,
+        {"assistant": "assistant", "research_plan": "research_plan"},
     )
 
-    # Assistant -> Tools OR END
     builder.add_conditional_edges(
         "assistant",
         tools_condition,
     )
 
-    # Tools -> Assistant
-    builder.add_edge(
+    def route_tools(state: AgentState) -> str:
+        if state.get("research_mode", False):
+            return "research_synthesize"
+        return "assistant"
+
+    builder.add_conditional_edges(
         "tools",
-        "assistant",
+        route_tools,
+        {"assistant": "assistant", "research_synthesize": "research_synthesize"},
     )
 
-    return builder.compile(
-        checkpointer=checkpointer
+    def route_research_plan(state: AgentState) -> str:
+        messages = state.get("messages", [])
+        if messages and getattr(messages[-1], "tool_calls", None):
+            return "tools"
+        return "research_synthesize"
+
+    builder.add_conditional_edges(
+        "research_plan",
+        route_research_plan,
+        {"tools": "tools", "research_synthesize": "research_synthesize"},
     )
+
+    builder.add_edge("research_synthesize", END)
+
+    return builder.compile(checkpointer=checkpointer)
 
 
 # ============================================================
@@ -1435,6 +1563,7 @@ def run_agent(
     user_id: str,
     messages: list[dict[str, Any]],
     thread_id: str,
+    research_mode: bool = False,
 ) -> dict[str, Any]:
     """
     Run the agent synchronously.
@@ -1490,7 +1619,8 @@ def run_agent(
 
         result = graph.invoke(
             {
-                "messages": input_messages
+                "messages": input_messages,
+                "research_mode": research_mode,
             },
             config=config,
         )
@@ -1518,8 +1648,9 @@ def stream_agent(
     user_id: str | None,
     messages: list[dict[str, Any]],
     thread_id: str,
+    research_mode: bool = False,
 ) -> Generator[
-    tuple[str, dict[str, Any],str],
+    tuple[str, dict[str, Any]],
     None,
     None,
 ]:
@@ -1584,7 +1715,8 @@ def stream_agent(
 
         for stream_mode, chunk in graph.stream(
             {
-                "messages": input_messages
+                "messages": input_messages,
+                "research_mode": research_mode,
             },
             config=config,
             stream_mode=["updates", "custom"],
