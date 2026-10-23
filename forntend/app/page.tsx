@@ -458,7 +458,7 @@ export default function HomePage() {
                 <CatLogo />
                 <div>
                   <h1 className="text-xl font-semibold">Create an image</h1>
-                  <p className="text-sm text-white/50">Describe what you want Cat GPT to make.</p>
+                  <p className="text-sm text-white/50">Describe what you want Nova GPT to make.</p>
                 </div>
               </div>
               <label htmlFor="image-prompt" className="mb-2 block text-sm text-white/70">
@@ -491,7 +491,7 @@ export default function HomePage() {
               {imageGenerating && (
                 <div className="mt-5 flex items-center gap-2 text-sm text-white/55" aria-live="polite">
                   <CatLogo animated className="h-7 w-7" />
-                  Cat GPT is creating your image…
+                  Nova GPT is creating your image…
                 </div>
               )}
               {latestGeneratedUrl && (
@@ -629,10 +629,10 @@ export default function HomePage() {
                               {message.streaming && (
                                 <span
                                   className="mb-2 inline-flex items-center gap-2"
-                                  aria-label="Cat GPT is responding"
+                                  aria-label="Nova GPT is responding"
                                 >
                                   <CatLogo animated className="h-7 w-7" />
-                                  <span className="text-xs font-medium text-white/55">Cat GPT</span>
+                                  <span className="text-xs font-medium text-white/55">Nova GPT</span>
                                 </span>
                               )}
                               {message.content && isUser ? (
@@ -888,7 +888,6 @@ function LoginScreen({
       <div className="w-full max-w-md rounded-2xl border border-surface-border bg-surface-raised p-6 text-center">
         <h1 className="mb-2 flex items-center justify-center gap-2 text-lg font-semibold">
           <CatLogo className="h-7 w-7" />
-          Cat GPT
         </h1>
         <p className="mb-5 text-sm text-white/60">Sign in to continue</p>
 
@@ -975,7 +974,7 @@ function LoginScreen({
             </div>
             <div ref={buttonRef} className="flex justify-center" />
             <p className="mt-2 text-center text-xs text-white/45">
-              Continue with your Google account. Cat GPT will sign you into the
+              Continue with your Google account. Nova GPT will sign you into the
               account for that verified email, or create one automatically if
               you&apos;re new.
             </p>

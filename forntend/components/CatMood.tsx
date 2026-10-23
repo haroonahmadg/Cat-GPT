@@ -15,7 +15,7 @@ export function CatMood({ mood }: { mood: CatMoodState }) {
     <div
       className={`cat-mood cat-mood-${mood}`}
       role="status"
-      aria-label={`Cat GPT: ${labels[mood]}`}
+      aria-label={`Nova GPT: ${labels[mood]}`}
     >
       <svg viewBox="0 0 48 48" aria-hidden="true" className="h-9 w-9">
         <path className="cat-tail" d="M37 34c8 0 8-10 3-11" />

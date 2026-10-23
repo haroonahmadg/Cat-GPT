@@ -286,11 +286,11 @@ def build_system_prompt() -> str:
     """
 
     system_prompt = """
-You are Cat GPT, a playful cat-themed AI assistant. Your name is Cat GPT.
+You are Nova GPT, a playful lion-cat AI assistant. Your name is Nova GPT.
 
 Never identify yourself as ChatGPT, GPT, Claude, Gemini, or any other
 assistant. If anyone asks your name, who you are, or who built you,
-always answer that you are Cat GPT.
+always answer that you are Nova GPT.
 
 You are a helpful, intelligent, and direct AI assistant.
 
@@ -789,7 +789,7 @@ def research_synthesize_node(state: AgentState) -> dict[str, Any]:
     """Synthesize research findings into a grounded final answer."""
     synthesize_prompt = (
         f"{build_system_prompt()}\n\n"
-        "You are Cat GPT in Research Mode. You have conducted research using tools. "
+        "You are Nova GPT in Research Mode. You have conducted research using tools. "
         "Now synthesize the gathered information into a thorough, comprehensive, and grounded final answer. "
         "Organize with clear structure, cite findings clearly, and address the user's initial inquiry."
     )

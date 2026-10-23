@@ -127,7 +127,6 @@ export function Sidebar({
       <div className="flex items-center justify-between px-3 py-3">
         <span className="flex items-center gap-2 text-sm font-semibold tracking-wide">
           <CatLogo className="h-7 w-7" />
-          Cat GPT
         </span>
         <div className="flex items-center gap-1">
           <IconButton aria-label="Search" onClick={() => setSearchOpen((p) => !p)}>
@@ -183,7 +182,14 @@ export function Sidebar({
             }`}
           >
             <Icon size={16} />
-            {label}
+            <span className="flex items-center gap-2">
+              {label}
+              {label !== "Images" && label !== "Library" && (
+                <span className="rounded bg-white/10 px-1.5 py-0.5 text-[10px] uppercase tracking-[0.08em] text-white/50">
+                  Coming Soon
+                </span>
+              )}
+            </span>
           </button>
         ))}
         <button

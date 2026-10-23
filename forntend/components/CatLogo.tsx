@@ -4,7 +4,7 @@ import { useState } from "react";
 export function CatLogo({
   className,
   animated = false,
-  label = "Cat GPT",
+  label = "Nova GPT",
   src = "/logo.png",
 }: {
   className?: string;

@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Cat GPT",
+  title: "Nova GPT",
   description: "Your AI assistant for chat, image generation, and more.",
 };
 
