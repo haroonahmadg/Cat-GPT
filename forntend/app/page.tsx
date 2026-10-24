@@ -176,8 +176,6 @@ export default function HomePage() {
     exportThreadById,
     editLastMessage,
     retryLastMessage,
-    researchMode,
-    setResearchMode,
   } = useChat();
 
   const openPrintView = (threadId: string) => {

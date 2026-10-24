@@ -12,7 +12,6 @@ import {
   Loader2,
   Paperclip,
   ScanEye,
-  Globe,
 } from "lucide-react";
 import clsx from "clsx";
 import { IconButton } from "@/components/ui/icon-button";
@@ -36,8 +35,6 @@ interface ChatInputProps {
   voiceError?: string | null;
   prefillText?: string;
   prefillKey?: number;
-  researchMode?: boolean;
-  onToggleResearchMode?: () => void;
 }
 
 export function ChatInput({
@@ -55,8 +52,6 @@ export function ChatInput({
   voiceError = null,
   prefillText,
   prefillKey,
-  researchMode = false,
-  onToggleResearchMode,
 }: ChatInputProps) {
   const [value, setValue] = useState("");
   const [thinkMode, setThinkMode] = useState(false);
@@ -327,22 +322,6 @@ export function ChatInput({
           style={{ maxHeight: TEXTAREA_MAX_HEIGHT }}
           className="flex-1 resize-none overflow-y-auto bg-transparent py-1.5 text-sm text-white placeholder:text-white/40 focus:outline-none disabled:cursor-not-allowed"
         />
-
-        <button
-          type="button"
-          onClick={onToggleResearchMode}
-          disabled={disabled}
-          className={clsx(
-            "flex flex-shrink-0 items-center gap-1.5 rounded-pill px-3 py-1.5 text-sm transition-colors disabled:cursor-not-allowed disabled:opacity-50",
-            researchMode
-              ? "bg-emerald-600 text-white"
-              : "text-white/70 hover:bg-surface-hover hover:text-white",
-          )}
-          title="Toggle research mode"
-        >
-          <Globe size={14} />
-          Research
-        </button>
 
         <button
           onClick={() => setThinkMode((prev) => !prev)}

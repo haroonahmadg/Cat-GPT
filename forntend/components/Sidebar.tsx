@@ -120,6 +120,7 @@ export function Sidebar({
       <div className="flex items-center justify-between px-3 py-3">
         <span className="flex items-center gap-2 text-sm font-semibold tracking-wide">
           <CatLogo className="h-7 w-7" />
+          <span>Nova AI</span>
         </span>
         <div className="flex items-center gap-1">
           <IconButton aria-label="Search" onClick={() => setSearchOpen((p) => !p)}>

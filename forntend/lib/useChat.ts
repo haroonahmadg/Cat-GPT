@@ -48,7 +48,6 @@ export function useChat() {
   const [isRecording, setIsRecording] = useState(false);
   const [voiceError, setVoiceError] = useState<string | null>(null);
   const [voiceStatus, setVoiceStatus] = useState<VoiceStatus>(null);
-  const [researchMode, setResearchMode] = useState(false);
 
   const abortRef = useRef<{ abort: () => void } | null>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
@@ -507,7 +506,6 @@ export function useChat() {
           setActivityLabel(null);
           setSendError(err.message || "The connection to the assistant was lost.");
         },
-        researchMode,
       );
     },
     [activeThreadId, attachments, imageAttachments, refreshThreads, startReveal, flushReveal],
@@ -846,7 +844,5 @@ export function useChat() {
     exportThreadById,
     editLastMessage,
     retryLastMessage,
-    researchMode,
-    setResearchMode,
   };
 }
